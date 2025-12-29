@@ -1,0 +1,1901 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Equations Synth – Preset Generator (Full + Instrument + Line Preview)</title>
+<style>
+  :root { --bg:#26323a; --panel:#1f2a31; --border:#4c5c66; --text:#eaeaea; --muted:#b7c0c7; }
+  body { background:var(--bg); color:var(--text); font-family:system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin:16px; }
+  h1 { margin:0 0 12px 0; font-size:20px; }
+  h2 { margin:14px 0 8px 0; font-size:16px; }
+  h3 { margin:10px 0 6px 0; font-size:14px; }
+  .row { display:flex; gap:10px; flex-wrap:wrap; }
+  .panel { background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:10px; margin-bottom:12px; }
+  .col { flex:1 1 340px; min-width:320px; }
+  label { display:block; font-size:12px; color:var(--muted); margin:8px 0 4px; }
+  input[type="text"], input[type="number"], select, textarea {
+    width:100%; box-sizing:border-box; padding:8px;
+    border-radius:6px; border:1px solid var(--border); background:#0f1519; color:var(--text);
+  }
+  input[type="range"] { width:100%; }
+  textarea { height:260px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; color:#9bff9b; background:#0b0f0c; }
+  button {
+    border:1px solid var(--border); background:#0f1519; color:var(--text);
+    padding:7px 10px; border-radius:6px; cursor:pointer; margin:4px 6px 4px 0;
+  }
+  button:hover { filter:brightness(1.08); }
+  .grid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:10px; }
+  .grid3 { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:10px; }
+  .tiny { font-size:11px; color:var(--muted); line-height:1.35; white-space:pre-wrap; }
+  .kv { display:flex; gap:8px; align-items:center; }
+  .kv > .k { min-width:140px; font-size:12px; color:var(--muted); }
+  .kv > .v { flex:1; }
+  .kbd { font-family:ui-monospace, monospace; padding:1px 5px; border:1px solid var(--border); border-radius:5px; background:#0f1519; }
+  canvas { width:100%; height:220px; border:1px solid var(--border); border-radius:8px; background:#0f1519; display:block; }
+  .summaryLine {
+    font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    font-size:12px; color:#d2d2d2; padding:8px; border:1px solid var(--border);
+    border-radius:6px; background:#0f1519; overflow:auto; white-space:nowrap;
+  }
+</style>
+</head>
+<body>
+  
+  <h1>Equations Synth – Preset Generator (Full + Instrument Generator + Line Preview)</h1>
+  
+  <div class="row">
+    <div class="panel col">
+      <h2>Instrument Generator + Line Preview</h2>
+      
+      <div class="grid">
+        <div>
+          <label>Instrument Type</label>
+          <select id="instrType">
+            <option value="Any">Any</option>
+            <option value="Bass">Bass</option>
+            <option value="Lead">Lead</option>
+            <option value="Pad">Pad</option>
+          <option value="Bell">Bell</option>
+          <option value="String">String</option>
+          <option value="Pluck">Pluck</option>
+          <option value="Perc">Perc</option>
+          <option value="Drone">Drone</option>
+          <option value="FX">FX</option>
+          <option value="Random">Random</option>
+        </select>
+      </div>
+      <div>
+        <label>Seed (optional)</label>
+        <input id="seed" type="text" placeholder="e.g. 12345 or leave blank"/>
+      </div>
+    </div>
+
+    <div>
+      <button id="btnGenerateInstrument">Generate Instrument</button>
+      <button id="btnPreview">Update Preview</button>
+      <button id="btnCopySummary">Copy Summary Line</button>
+    </div>
+
+    <label>Preview (equation output line)</label>
+    <canvas id="preview" width="1200" height="320"></canvas>
+
+    <label>Line Display (patch summary)</label>
+    <div id="summaryLine" class="summaryLine"></div>
+
+    <div class="tiny">
+Preview notes:
+- This is a browser visualization (not the plugin audio path).
+- It evaluates your equation using Math functions and plots y(x) after X/Y scale + X offset.
+- Mirroring is approximated by folding x into X+ / X− regions (bitmask).
+    </div>
+  </div>
+
+  <div class="panel col">
+    <h2>Preset Actions</h2>
+    <div>
+      <button id="btnBuild">Build XML</button>
+      <button id="btnCopy">Copy XML</button>
+      <button id="btnLoad">Load XML → UI</button>
+      <button id="btnReset">Reset to Defaults</button>
+      <button id="btnRandom">Randomize (safe)</button>
+    </div>
+
+    <h3>Preset XML</h3>
+    <textarea id="xmlOut"></textarea>
+    <div class="tiny">
+Copy/paste this XML into the plugin preset system.
+Keyboard:
+Ctrl/Cmd+Enter Randomize • Ctrl/Cmd+C Copy XML • Ctrl/Cmd+L Load XML • Ctrl/Cmd+B Build XML
+    </div>
+  </div>
+</div>
+
+<div class="row">
+  <div class="panel col">
+    <h2>Equation</h2>
+    <label>Expression (uses x, a, b, c, d)</label>
+    <input id="equation" type="text" value="log(abs(sin(x * a) + 1.1)) * sin(x)"/>
+
+    <div class="grid">
+      <div>
+        <label>A (paramA)</label>
+        <input id="paramA" type="range" min="-10" max="10" step="0.000001"/>
+        <div class="kv"><div class="k">Value</div><div class="v"><input id="paramA_num" type="number" step="0.000001"/></div></div>
+      </div>
+      <div>
+        <label>B (paramB)</label>
+        <input id="paramB" type="range" min="-10" max="10" step="0.000001"/>
+        <div class="kv"><div class="k">Value</div><div class="v"><input id="paramB_num" type="number" step="0.000001"/></div></div>
+      </div>
+      <div>
+        <label>C (paramC)</label>
+        <input id="paramC" type="range" min="-10" max="10" step="0.000001"/>
+        <div class="kv"><div class="k">Value</div><div class="v"><input id="paramC_num" type="number" step="0.000001"/></div></div>
+      </div>
+      <div>
+        <label>D (paramD)</label>
+        <input id="paramD" type="range" min="-10" max="10" step="0.000001"/>
+        <div class="kv"><div class="k">Value</div><div class="v"><input id="paramD_num" type="number" step="0.000001"/></div></div>
+      </div>
+    </div>
+
+    <div class="tiny">
+Mirroring encoding (xMirroring): 0=none, 1=X+, 2=X−, 3=both (bitmask).
+Confirmed: voiceMode 0=Poly. filterType 3=LP 4-Pole. lfoRetrigger 0=Free, 1=Global. delayTimeFormat 0=Seconds.
+    </div>
+  </div>
+
+  <div class="panel col">
+    <h2>Graph</h2>
+    <div class="grid">
+      <div>
+        <label>X Scale (xScale)</label>
+        <input id="xScale" type="range" min="0.01" max="5" step="0.000001"/>
+        <div class="kv"><div class="k">Value</div><div class="v"><input id="xScale_num" type="number" step="0.000001"/></div></div>
+      </div>
+      <div>
+        <label>Y Scale (yScale)</label>
+        <input id="yScale" type="range" min="0.01" max="5" step="0.000001"/>
+        <div class="kv"><div class="k">Value</div><div class="v"><input id="yScale_num" type="number" step="0.000001"/></div></div>
+      </div>
+      <div>
+        <label>X Offset (xOffset)</label>
+        <input id="xOffset" type="range" min="-6.2830477" max="6.2830477" step="0.000001"/>
+        <div class="kv"><div class="k">Value</div><div class="v"><input id="xOffset_num" type="number" step="0.000001"/></div></div>
+      </div>
+      <div>
+        <label>Mirroring (xMirroring)</label>
+        <div class="tiny">
+          <label><input id="mirrorXp" type="checkbox"/> Mirror X+</label>
+          <label><input id="mirrorXm" type="checkbox"/> Mirror X−</label>
+        </div>
+      </div>
+    </div>
+
+    <h3>Ranges (Advanced)</h3>
+    <div class="grid">
+      <div><label>paramARangeMin</label><input id="paramARangeMin" type="number" step="0.000001"/></div>
+      <div><label>paramARangeMax</label><input id="paramARangeMax" type="number" step="0.000001"/></div>
+      <div><label>paramBRangeMin</label><input id="paramBRangeMin" type="number" step="0.000001"/></div>
+      <div><label>paramBRangeMax</label><input id="paramBRangeMax" type="number" step="0.000001"/></div>
+      <div><label>paramCRangeMin</label><input id="paramCRangeMin" type="number" step="0.000001"/></div>
+      <div><label>paramCRangeMax</label><input id="paramCRangeMax" type="number" step="0.000001"/></div>
+      <div><label>paramDRangeMin</label><input id="paramDRangeMin" type="number" step="0.000001"/></div>
+      <div><label>paramDRangeMax</label><input id="paramDRangeMax" type="number" step="0.000001"/></div>
+      <div><label>xOffsetRangeMin</label><input id="xOffsetRangeMin" type="number" step="0.000001"/></div>
+      <div><label>xOffsetRangeMax</label><input id="xOffsetRangeMax" type="number" step="0.000001"/></div>
+    </div>
+  </div>
+</div>
+
+<div class="row">
+  <div class="panel col">
+    <h2>Pitch & General</h2>
+
+    <div class="grid">
+      <div>
+        <label>oscPitchCoarse (semitones)</label>
+        <input id="oscPitchCoarse" type="range" min="-48" max="48" step="0.000001"/>
+        <div class="kv"><div class="k">Value</div><div class="v"><input id="oscPitchCoarse_num" type="number" step="0.000001"/></div></div>
+      </div>
+      <div>
+        <label>oscPitchFine</label>
+        <input id="oscPitchFine" type="range" min="-100" max="100" step="0.000001"/>
+        <div class="kv"><div class="k">Value</div><div class="v"><input id="oscPitchFine_num" type="number" step="0.000001"/></div></div>
+      </div>
+      <div>
+        <label>voiceMode</label>
+        <select id="voiceMode">
+          <option value="0">0 = Poly (confirmed)</option>
+        </select>
+      </div>
+      <div>
+        <label>glideTime (seconds)</label>
+        <input id="glideTime" type="range" min="0" max="2" step="0.000001"/>
+        <div class="kv"><div class="k">Value</div><div class="v"><input id="glideTime_num" type="number" step="0.000001"/></div></div>
+      </div>
+    </div>
+
+    <h3>Volumes / Noise</h3>
+    <div class="grid">
+      <div>
+        <label>mainVolume</label>
+        <input id="mainVolume" type="range" min="0" max="1" step="0.000001"/>
+        <div class="kv"><div class="k">Value</div><div class="v"><input id="mainVolume_num" type="number" step="0.000001"/></div></div>
+      </div>
+      <div>
+        <label>oscVolume</label>
+        <input id="oscVolume" type="range" min="0" max="1" step="0.000001"/>
+        <div class="kv"><div class="k">Value</div><div class="v"><input id="oscVolume_num" type="number" step="0.000001"/></div></div>
+      </div>
+      <div>
+        <label>noiseLevel</label>
+        <input id="noiseLevel" type="range" min="0" max="1" step="0.000001"/>
+        <div class="kv"><div class="k">Value</div><div class="v"><input id="noiseLevel_num" type="number" step="0.000001"/></div></div>
+      </div>
+    </div>
+
+    <h3>Filter</h3>
+    <div class="grid">
+      <div>
+        <label>filterType</label>
+        <select id="filterType">
+          <option value="3">3 = LP 4-Pole (confirmed)</option>
+        </select>
+      </div>
+      <div>
+        <label>filterCutoff</label>
+        <input id="filterCutoff" type="range" min="0" max="1" step="0.000001"/>
+        <div class="kv"><div class="k">Value</div><div class="v"><input id="filterCutoff_num" type="number" step="0.000001"/></div></div>
+      </div>
+      <div>
+        <label>filterResonance</label>
+        <input id="filterResonance" type="range" min="0" max="1" step="0.000001"/>
+        <div class="kv"><div class="k">Value</div><div class="v"><input id="filterResonance_num" type="number" step="0.000001"/></div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel col">
+    <h2>Envelopes</h2>
+
+    <h3>Envelope 1 (Volume)</h3>
+    <div class="grid">
+      <div><label>env1Attack</label><input id="env1Attack" type="range" min="0" max="10" step="0.000001"/><input id="env1Attack_num" type="number" step="0.000001"/></div>
+      <div><label>env1Decay</label><input id="env1Decay" type="range" min="0" max="10" step="0.000001"/><input id="env1Decay_num" type="number" step="0.000001"/></div>
+      <div><label>env1Sustain</label><input id="env1Sustain" type="range" min="0" max="1" step="0.000001"/><input id="env1Sustain_num" type="number" step="0.000001"/></div>
+      <div><label>env1Release</label><input id="env1Release" type="range" min="0" max="10" step="0.000001"/><input id="env1Release_num" type="number" step="0.000001"/></div>
+    </div>
+
+    <h3>Envelope 2</h3>
+    <div class="grid">
+      <div><label>env2Attack</label><input id="env2Attack" type="range" min="0" max="10" step="0.000001"/><input id="env2Attack_num" type="number" step="0.000001"/></div>
+      <div><label>env2Decay</label><input id="env2Decay" type="range" min="0" max="10" step="0.000001"/><input id="env2Decay_num" type="number" step="0.000001"/></div>
+      <div><label>env2Sustain</label><input id="env2Sustain" type="range" min="0" max="1" step="0.000001"/><input id="env2Sustain_num" type="number" step="0.000001"/></div>
+      <div><label>env2Release</label><input id="env2Release" type="range" min="0" max="10" step="0.000001"/><input id="env2Release_num" type="number" step="0.000001"/></div>
+    </div>
+
+    <h3>Envelope 3</h3>
+    <div class="grid">
+      <div><label>env3Attack</label><input id="env3Attack" type="range" min="0" max="10" step="0.000001"/><input id="env3Attack_num" type="number" step="0.000001"/></div>
+      <div><label>env3Decay</label><input id="env3Decay" type="range" min="0" max="10" step="0.000001"/><input id="env3Decay_num" type="number" step="0.000001"/></div>
+      <div><label>env3Sustain</label><input id="env3Sustain" type="range" min="0" max="1" step="0.000001"/><input id="env3Sustain_num" type="number" step="0.000001"/></div>
+      <div><label>env3Release</label><input id="env3Release" type="range" min="0" max="10" step="0.000001"/><input id="env3Release_num" type="number" step="0.000001"/></div>
+    </div>
+  </div>
+</div>
+
+<div class="row">
+  <div class="panel col">
+    <h2>LFOs</h2>
+
+    <h3>LFO 1</h3>
+    <div class="grid">
+      <div><label>lfo1Rate</label><input id="lfo1Rate" type="range" min="0" max="20" step="0.000001"/><input id="lfo1Rate_num" type="number" step="0.000001"/></div>
+      <div>
+        <label>lfo1Shape</label>
+        <select id="lfo1Shape">
+          <option value="0">0 (unknown mapping)</option><option value="1">1</option><option value="2">2</option><option value="3">3</option>
+        </select>
+      </div>
+      <div>
+        <label>lfo1Retrigger</label>
+        <select id="lfo1Retrigger">
+          <option value="0">0 = Free (confirmed)</option>
+          <option value="1">1 = Global (confirmed)</option>
+        </select>
+      </div>
+      <div>
+        <label>lfo1RateFormat</label>
+        <select id="lfo1RateFormat">
+          <option value="0">0 = Hz (confirmed)</option><option value="1">1 (likely Sync)</option>
+        </select>
+      </div>
+      <div><label>lfo1Delay</label><input id="lfo1Delay" type="range" min="0" max="600" step="0.000001"/><input id="lfo1Delay_num" type="number" step="0.000001"/></div>
+      <div><label>lfo1RateMusical</label><input id="lfo1RateMusical" type="range" min="0" max="32" step="1"/><input id="lfo1RateMusical_num" type="number" step="1"/></div>
+    </div>
+
+    <h3>LFO 2</h3>
+    <div class="grid">
+      <div><label>lfo2Rate</label><input id="lfo2Rate" type="range" min="0" max="20" step="0.000001"/><input id="lfo2Rate_num" type="number" step="0.000001"/></div>
+      <div>
+        <label>lfo2Shape</label>
+        <select id="lfo2Shape">
+          <option value="0">0 (unknown mapping)</option><option value="1">1</option><option value="2">2</option><option value="3">3</option>
+        </select>
+      </div>
+      <div>
+        <label>lfo2Retrigger</label>
+        <select id="lfo2Retrigger">
+          <option value="0">0 = Free (confirmed)</option>
+          <option value="1">1 = Global (confirmed)</option>
+        </select>
+      </div>
+      <div>
+        <label>lfo2RateFormat</label>
+        <select id="lfo2RateFormat">
+          <option value="0">0 = Hz (confirmed)</option><option value="1">1 (likely Sync)</option>
+        </select>
+      </div>
+      <div><label>lfo2Delay</label><input id="lfo2Delay" type="range" min="0" max="600" step="0.000001"/><input id="lfo2Delay_num" type="number" step="0.000001"/></div>
+      <div><label>lfo2RateMusical</label><input id="lfo2RateMusical" type="range" min="0" max="32" step="1"/><input id="lfo2RateMusical_num" type="number" step="1"/></div>
+    </div>
+
+    <h3>LFO 3</h3>
+    <div class="grid">
+      <div><label>lfo3Rate</label><input id="lfo3Rate" type="range" min="0" max="20" step="0.000001"/><input id="lfo3Rate_num" type="number" step="0.000001"/></div>
+      <div>
+        <label>lfo3Shape</label>
+        <select id="lfo3Shape">
+          <option value="0">0 (unknown mapping)</option><option value="1">1</option><option value="2">2</option><option value="3">3</option>
+        </select>
+      </div>
+      <div>
+        <label>lfo3Retrigger</label>
+        <select id="lfo3Retrigger">
+          <option value="0">0 = Free (confirmed)</option>
+          <option value="1">1 = Global (confirmed)</option>
+        </select>
+      </div>
+      <div>
+        <label>lfo3RateFormat</label>
+        <select id="lfo3RateFormat">
+          <option value="0">0 = Hz (confirmed)</option><option value="1">1 (likely Sync)</option>
+        </select>
+      </div>
+      <div><label>lfo3Delay</label><input id="lfo3Delay" type="range" min="0" max="600" step="0.000001"/><input id="lfo3Delay_num" type="number" step="0.000001"/></div>
+      <div><label>lfo3RateMusical</label><input id="lfo3RateMusical" type="range" min="0" max="32" step="1"/><input id="lfo3RateMusical_num" type="number" step="1"/></div>
+    </div>
+  </div>
+
+  <div class="panel col">
+    <h2>FX</h2>
+
+    <h3>Chorus</h3>
+    <div class="grid">
+      <div><label>chorusEnabled</label><select id="chorusEnabled"><option value="0">0 Off</option><option value="1">1 On</option></select></div>
+      <div><label>chorusMix</label><input id="chorusMix" type="range" min="0" max="1" step="0.000001"/><input id="chorusMix_num" type="number" step="0.000001"/></div>
+      <div><label>chorusRate</label><input id="chorusRate" type="range" min="0" max="1" step="0.000001"/><input id="chorusRate_num" type="number" step="0.000001"/></div>
+      <div><label>chorusDepth</label><input id="chorusDepth" type="range" min="0" max="1" step="0.000001"/><input id="chorusDepth_num" type="number" step="0.000001"/></div>
+    </div>
+
+    <h3>Delay</h3>
+    <div class="grid">
+      <div><label>delayEnabled</label><select id="delayEnabled"><option value="0">0 Off</option><option value="1">1 On</option></select></div>
+      <div><label>delayTimeFormat</label><select id="delayTimeFormat"><option value="0">0 Seconds (confirmed)</option><option value="1">1 (likely Sync)</option></select></div>
+      <div><label>delayWetLevel</label><input id="delayWetLevel" type="range" min="0" max="1" step="0.000001"/><input id="delayWetLevel_num" type="number" step="0.000001"/></div>
+      <div><label>delayFeedback</label><input id="delayFeedback" type="range" min="0" max="1" step="0.000001"/><input id="delayFeedback_num" type="number" step="0.000001"/></div>
+      <div><label>delayTime</label><input id="delayTime" type="range" min="0" max="1" step="0.000001"/><input id="delayTime_num" type="number" step="0.000001"/></div>
+      <div><label>delayTimeMusical</label><input id="delayTimeMusical" type="range" min="0" max="32" step="1"/><input id="delayTimeMusical_num" type="number" step="1"/></div>
+      <div><label>delayStereoOffset</label><input id="delayStereoOffset" type="range" min="-1" max="1" step="0.000001"/><input id="delayStereoOffset_num" type="number" step="0.000001"/></div>
+    </div>
+
+    <h3>Reverb</h3>
+    <div class="grid">
+      <div><label>reverbEnabled</label><select id="reverbEnabled"><option value="0">0 Off</option><option value="1">1 On</option></select></div>
+      <div><label>reverbMix</label><input id="reverbMix" type="range" min="0" max="1" step="0.000001"/><input id="reverbMix_num" type="number" step="0.000001"/></div>
+      <div><label>reverbDamping</label><input id="reverbDamping" type="range" min="0" max="1" step="0.000001"/><input id="reverbDamping_num" type="number" step="0.000001"/></div>
+      <div><label>reverbRoomSize</label><input id="reverbRoomSize" type="range" min="0" max="1" step="0.000001"/><input id="reverbRoomSize_num" type="number" step="0.000001"/></div>
+      <div><label>reverbHarmonicsLevel</label><input id="reverbHarmonicsLevel" type="range" min="0" max="1" step="0.000001"/><input id="reverbHarmonicsLevel_num" type="number" step="0.000001"/></div>
+      <div><label>reverbHarmonicsMode</label><select id="reverbHarmonicsMode"><option value="0">0 (not fully mapped)</option><option value="1">1</option><option value="2">2</option><option value="3">3</option></select></div>
+    </div>
+
+    <h3>Tape</h3>
+    <div class="grid">
+      <div><label>tapeEnabled</label><select id="tapeEnabled"><option value="0">0 Off</option><option value="1">1 On</option></select></div>
+      <div><label>tapeMix</label><input id="tapeMix" type="range" min="0" max="1" step="0.000001"/><input id="tapeMix_num" type="number" step="0.000001"/></div>
+      <div><label>tapeWow</label><input id="tapeWow" type="range" min="0" max="1" step="0.000001"/><input id="tapeWow_num" type="number" step="0.000001"/></div>
+      <div><label>tapeFlutter</label><input id="tapeFlutter" type="range" min="0" max="1" step="0.000001"/><input id="tapeFlutter_num" type="number" step="0.000001"/></div>
+      <div><label>tapeModel</label><select id="tapeModel"><option value="0">0 (unknown mapping)</option><option value="1">1</option><option value="2">2</option><option value="3">3</option></select></div>
+      <div><label>tapeSaturation</label><input id="tapeSaturation" type="range" min="0" max="1" step="0.000001"/><input id="tapeSaturation_num" type="number" step="0.000001"/></div>
+      <div><label>tapeNoise</label><input id="tapeNoise" type="range" min="0" max="1" step="0.000001"/><input id="tapeNoise_num" type="number" step="0.000001"/></div>
+    </div>
+  </div>
+</div>
+
+<div class="row">
+  <div class="panel col">
+    <h2>Modulation Matrix (Editor)</h2>
+    <div class="tiny">
+Sources: 01 Velocity, 02 ModWheel, 03 Env1, 04 Env2, 05 Env3, 06 LFO1, 07 LFO2, 08 LFO3, 09 MPE Timbre, 10 MPE Pressure
+Destinations: 01 Volume, 02 Pitch(Coarse), 03 Pitch(Fine), 04 A, 05 B, 06 C, 07 D, 08 XScale, 09 YScale, 10 XOffset, 11 Cutoff, 12 Res, 13 Noise
+    </div>
+
+    <div class="grid3">
+      <div><label>Source</label><select id="modSource"></select></div>
+      <div><label>Destination</label><select id="modDest"></select></div>
+      <div>
+        <label>Amount (-1..1)</label>
+        <input id="modAmt" type="range" min="-1" max="1" step="0.000001"/>
+        <input id="modAmt_num" type="number" step="0.000001"/>
+      </div>
+    </div>
+
+    <div>
+      <button id="btnSetMod">Set Slot</button>
+      <button id="btnClearMod">Clear Slot</button>
+      <button id="btnClearAllMods">Clear All Mods</button>
+    </div>
+
+    <h3>Quick View</h3>
+    <div id="modView" class="tiny"></div>
+  </div>
+
+  <div class="panel col">
+    <h2>Tuning Settings</h2>
+    <div class="grid">
+      <div><label>tuningSettings enabled</label><select id="tuning_enabled"><option value="0">0 Off</option><option value="1">1 On</option></select></div>
+      <div><label>a69Frequency</label><input id="tuning_a69" type="number" step="0.000001"/></div>
+      <div><label>sclPath</label><input id="tuning_scl" type="text"/></div>
+      <div><label>kbmPath</label><input id="tuning_kbm" type="text"/></div>
+    </div>
+  </div>
+</div>
+
+<script>
+function stripAllWhitespace(s){
+  return String(s ?? "").replace(/\s+/g, "");
+}
+
+function lsGetJson(key, fallback){
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return fallback;
+    return JSON.parse(raw);
+  } catch {
+    return fallback;
+  }
+}
+function lsSetJson(key, value){
+  try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
+}
+
+/**
+ * “Not truly random” shuffle:
+ * - Shuffle-bag (no repeats until bag is exhausted)
+ * - Recency avoidance (penalize recently used “style groups”)
+ *
+ * Common names: shuffle bag, anti-clustering shuffle, history-biased shuffle.
+ */
+function makeShuffleState(storageKey){
+  const st = lsGetJson(storageKey, {
+    usedEq: {},          // { [eqString]: 1 }
+    bagByType: {},       // { [type]: [eqString, ...] }
+    idxByType: {},       // { [type]: 0 }  (cursor into bag)
+    recentStyle: [],     // [{type, style, t}]
+    recentEq: [],        // [eqString, ...]
+    version: 1
+  });
+  return {
+    st,
+    save(){ lsSetJson(storageKey, st); }
+  };
+}
+
+let LAST_INSTRUMENT_SIGNATURE = null;
+
+function _fv(id){
+  const el = document.getElementById(id);
+  const v = el ? parseFloat(el.value) : NaN;
+  return Number.isFinite(v) ? v : 0;
+}
+
+// compact “sound signature” (cheap proxy for timbre)
+function instrumentSignature(eq){
+  const style = classifyStyle(eq).filter(Boolean).sort().join("|");
+
+  return {
+    style,
+    // most audible macro params
+    filterCutoff: _fv("filterCutoff"),
+    filterResonance: _fv("filterResonance"),
+    filterType: Math.round(_fv("filterType")),
+
+    xScale: _fv("xScale"),
+    yScale: _fv("yScale"),
+    xOffset: _fv("xOffset"),
+    xMirroring: Math.round(_fv("xMirroring")),
+
+    envA: _fv("env1Attack"),
+    envD: _fv("env1Decay"),
+    envS: _fv("env1Sustain"),
+    envR: _fv("env1Release"),
+
+    oscVol: _fv("oscVolume"),
+    noise: _fv("noiseLevel"),
+  };
+}
+
+function _nd(a,b,scale){
+  // normalized absolute difference
+  return Math.min(1, Math.abs(a-b) / (scale || 1));
+}
+
+function signatureDistance(a, b){
+  if (!a || !b) return 1;
+
+  // style penalty: identical style flags makes it “feel” similar even if params differ
+  const styleSame = (a.style === b.style) ? 1 : 0;
+
+  // weight the most audible stuff higher
+  let d = 0;
+  d += 0.30 * _nd(a.filterCutoff, b.filterCutoff, 1);
+  d += 0.25 * _nd(a.filterResonance, b.filterResonance, 1);
+  d += 0.10 * (a.filterType === b.filterType ? 0 : 1);
+
+  d += 0.10 * _nd(a.xScale, b.xScale, 2);
+  d += 0.07 * _nd(a.yScale, b.yScale, 2);
+  d += 0.05 * _nd(a.xOffset, b.xOffset, 2);
+  d += 0.03 * (a.xMirroring === b.xMirroring ? 0 : 1);
+
+  d += 0.03 * _nd(a.envA, b.envA, 2);
+  d += 0.03 * _nd(a.envD, b.envD, 2);
+  d += 0.02 * _nd(a.envS, b.envS, 1);
+  d += 0.03 * _nd(a.envR, b.envR, 2);
+
+  d += 0.02 * _nd(a.oscVol, b.oscVol, 1);
+  d += 0.02 * _nd(a.noise, b.noise, 1);
+
+  // subtract similarity penalty
+  d -= 0.20 * styleSame;
+
+  // clamp 0..1
+  return Math.max(0, Math.min(1, d));
+}
+
+// Stable “style group” tagging from the string itself.
+// Used only to avoid obvious clustering.
+function classifyStyle(eq){
+  const s = String(eq);
+  const flags = [
+    s.includes("tanh(") ? "tanh" : "",
+    s.includes("atan(") ? "atan" : "",
+    s.includes("log(")  ? "log"  : "",
+    s.includes("exp(")  ? "exp"  : "",
+    s.includes("pow(")  ? "pow"  : "",
+    s.includes("tan(")  ? "tan"  : "",
+    s.includes("sqrt(") ? "sqrt" : "",
+    (s.match(/sin\(/g)||[]).length >= 3 ? "multiSin" : "",
+    s.includes("*") ? "mul" : "",
+    s.includes("/") ? "div" : ""
+  ].filter(Boolean);
+  return flags.length ? flags.join("+") : "plain";
+}
+
+// Fisher–Yates shuffle using provided rng()
+function shuffleInPlace(rng, arr){
+  for (let i = arr.length - 1; i > 0; i--){
+    const j = Math.floor(rng() * (i + 1));
+    const t = arr[i]; arr[i] = arr[j]; arr[j] = t;
+  }
+  return arr;
+}
+
+function copyTextToClipboard(text){
+  const s = String(text ?? "");
+  // Prefer modern API
+  if (navigator.clipboard && typeof navigator.clipboard.writeText === "function"){
+    navigator.clipboard.writeText(s).catch(()=>{});
+    return;
+  }
+  // Fallback
+  const ta = document.createElement("textarea");
+  ta.value = s;
+  ta.setAttribute("readonly", "true");
+  ta.style.position = "fixed";
+  ta.style.left = "-9999px";
+  document.body.appendChild(ta);
+  ta.select();
+  try { document.execCommand("copy"); } catch(e) {}
+  document.body.removeChild(ta);
+}
+
+function focusSelectAndCopyEquationNoSpaces(){
+  const eqEl = document.getElementById("equation");
+  if (!eqEl) return;
+  eqEl.focus();
+  eqEl.setSelectionRange(0, eqEl.value.length);
+  copyTextToClipboard(stripAllWhitespace(eqEl.value));
+}
+
+/**
+ * Build large, non-patterny template pools programmatically.
+ * This avoids maintaining massive hard-coded lists while still producing
+ * hundreds of DISTINCT equation strings per instrument.
+ */
+function buildInstrumentTemplatePools(){
+  const EPS = "0.000001";
+
+  // Helper pieces (strings)
+  const K1 = ["0.12","0.18","0.22","0.28","0.35","0.42","0.55","0.68","0.85","1.0","1.2","1.5","1.8","2.2","2.6","3.0"];
+  const K2 = ["0.07","0.1","0.14","0.2","0.25","0.3","0.4","0.5","0.6","0.75","0.9","1.1"];
+  const PH = ["0","0.35","0.6","0.9","1.2","1.57","2.1"];
+  const VAR = ["a","b","c","d"];
+  const HARM = ["1","2","3","4","5","6","7","8"];
+
+  const sin = (arg) => `sin(${arg})`;
+  const cos = (arg) => `cos(${arg})`;
+  const tanh = (arg) => `tanh(${arg})`;
+  const atan = (arg) => `atan(${arg})`;
+  const abs = (arg) => `abs(${arg})`;
+  const loga = (arg) => `log(${abs(arg)} + ${EPS})`;
+  const sqrta = (arg) => `sqrt(${abs(arg)} + ${EPS})`;
+  const expSafe = (arg, k) => `exp(tanh(${arg})*${k})`; // bounded exponent input
+  const powSafe = (base, e) => `pow(${abs(base)} + ${EPS}, ${e})`;
+  const divSafe = (num, den) => `((${num})/(abs(${den})+${EPS}))`;
+
+  function uniq(arr){
+    return Array.from(new Set(arr));
+  }
+
+  function combosBasePhase(){
+    const out = [];
+    for (const v of VAR){
+      for (const h of HARM){
+        for (const p of PH){
+          out.push(`x*${v}*${h}+${p}`);
+        }
+      }
+    }
+    return out;
+  }
+
+  const PHASES = combosBasePhase();
+
+  // Core “voices” to recombine
+  function voiceAdditive(depth){
+    const out = [];
+    for (let i=0;i<PHASES.length;i+=Math.max(1, Math.floor(PHASES.length/(18+depth*6)))){
+      const p1 = PHASES[i];
+      const p2 = PHASES[(i+17) % PHASES.length];
+      const p3 = PHASES[(i+41) % PHASES.length];
+      const k1 = K1[(i*3) % K1.length];
+      const k2 = K2[(i*5) % K2.length];
+      out.push(`(${k1}*${sin(p1)} + ${k2}*${sin(p2)} + ${K2[(i*7)%K2.length]}*${sin(p3)})`);
+    }
+    return out;
+  }
+
+  function voiceFM(){
+    const out = [];
+    for (let i=0;i<PHASES.length;i+=Math.max(1, Math.floor(PHASES.length/22))){
+      const car = PHASES[i];
+      const mod = PHASES[(i+29) % PHASES.length];
+      const idx = K2[(i*4) % K2.length];
+      out.push(`${sin(`${car} + ${idx}*${sin(mod)}`)}`);
+      out.push(`${sin(`${car} + ${idx}*${sin(mod)} + ${K2[(i*6)%K2.length]}*${sin(PHASES[(i+7)%PHASES.length])}`)}`);
+    }
+    return out;
+  }
+
+  function voiceAM(){
+    const out = [];
+    for (let i=0;i<PHASES.length;i+=Math.max(1, Math.floor(PHASES.length/24))){
+      const p1 = PHASES[i];
+      const p2 = PHASES[(i+13) % PHASES.length];
+      const amt = K2[(i*3) % K2.length];
+      out.push(`(${sin(p1)} * (1 + ${amt}*${sin(p2)}))`);
+      out.push(`(${sin(p1)} * (1 - ${amt}*${abs(sin(p2))}))`);
+    }
+    return out;
+  }
+
+  function voiceFold(){
+    const out = [];
+    for (let i=0;i<PHASES.length;i+=Math.max(1, Math.floor(PHASES.length/26))){
+      const p = PHASES[i];
+      const drive = K1[(i*2) % K1.length];
+      out.push(`${tanh(`${drive}*${sin(p)}`)}`);
+      out.push(`${atan(`${drive}*${sin(p)} + ${K2[(i*9)%K2.length]}*${sin(PHASES[(i+31)%PHASES.length])}`)}`);
+    }
+    return out;
+  }
+
+  function voiceNoiseLike(){
+    const out = [];
+    for (let i=0;i<PHASES.length;i+=Math.max(1, Math.floor(PHASES.length/30))){
+      const p1 = PHASES[i];
+      const p2 = PHASES[(i+3) % PHASES.length];
+      // deterministic chaos-ish but still bounded
+      out.push(`${tanh(`${sin(p1)} + ${sin(`${p2} + ${sin(p1)}`)} + ${K2[(i*7)%K2.length]}*${sin(PHASES[(i+19)%PHASES.length])}`)}`);
+      out.push(`${atan(`${sin(p1)} + ${cos(`${p2} + ${sin(p1)}`)} + ${K2[(i*11)%K2.length]}*${sin(PHASES[(i+23)%PHASES.length])}`)}`);
+    }
+    return out;
+  }
+
+  // Build per-instrument pools (hundreds each), tuned by “character”.
+  const additive = voiceAdditive(2);
+  const fm = voiceFM();
+  const am = voiceAM();
+  const fold = voiceFold();
+  const noisy = voiceNoiseLike();
+
+  function makeBass(){
+    const out = [];
+    for (const v of fold){
+      out.push(v);
+      out.push(`${tanh(`${v} + 0.22*${sin("x*b*2")}`)}`);
+      out.push(`${atan(`${v} + 0.18*${sin("x*a*3")}`)}`);
+    }
+    // sub reinforcement
+    for (const p of ["x*a","x*a*2","x*b","x*b*2"]){
+      out.push(`${tanh(`${sin(p)} + 0.25*${sin(`${p}*2`)}`)}`);
+      out.push(`${atan(`${sin(p)} + 0.2*${sin(`${p}*3`)}`)}`);
+    }
+    return uniq(out);
+  }
+
+  function makeLead(){
+    const out = [];
+    for (const v of fm){
+      out.push(v);
+      out.push(`${atan(`1.4*(${v})`)}`);
+      out.push(`${tanh(`1.1*(${v}) + 0.18*${sin("x*c*4")}`)}`);
+    }
+    for (const v of am){
+      out.push(`${atan(`1.25*(${v}) + 0.12*${sin("x*d*5")}`)}`);
+    }
+    // bright edge
+    out.push(...uniq([
+      `sin(x*a + 0.35*sin(x*b) + 0.12*sin(x*c*5))`,
+      `atan(1.7*sin(x*a + 0.55*sin(x*b)))`,
+      `tanh(1.3*sin(x*a)*(1+0.45*sin(x*b)))`
+    ]));
+    return uniq(out);
+  }
+
+  function makePad(){
+    const out = [];
+    for (const v of additive){
+      out.push(v);
+      out.push(`${tanh(`0.9*(${v})`)}`);
+      out.push(`${tanh(`(${v}) + 0.12*${sin("x*d")}`)}`);
+      out.push(`(${v} + 0.08*${sin("x*c*0.5")})`);
+    }
+    // gentle smoothing / airy
+    out.push(...uniq([
+      `tanh(0.75*sin(x*a) + 0.55*sin(x*b) + 0.25*sin(x*c))`,
+      `sin(x*a) + 0.6*sin(x*b) + 0.3*sin(x*c) + 0.12*sin(x*d)`,
+      `tanh(sin(x*a + 0.2*sin(x*b)) + 0.18*sin(x*c))`
+    ]));
+    return uniq(out);
+  }
+
+  function makePluck(){
+    const out = [];
+    for (const v of fm){
+      out.push(`(${v}) * ${expSafe(`-abs(${sin("x*b")})`, "1.0")}`);
+      out.push(`(${v}) * (1 - 0.85*abs(${sin("x*c")}))`);
+      out.push(`(${v}) * ${expSafe(`-abs(${sin("x*d*2")})`, "0.85")}`);
+    }
+    // classic pluck-ish shapers
+    out.push(...uniq([
+      `sin(x*a) * exp(-abs(sin(x*b)))`,
+      `sin(x*a) * (1 - 0.85*abs(sin(x*b)))`,
+      `log(abs(sin(x*a) + 1.1)) * sin(x)`
+    ]));
+    return uniq(out);
+  }
+
+  function makePerc(){
+    const out = [];
+    for (const v of fold){
+      out.push(`${tanh(`2.4*(${v})`) } * (1 - abs(${sin("x*b")}))`);
+      out.push(`${sin("x*a")} * ${sin("x*b")} * ${sin("x*c")} `);
+      out.push(`${tanh(`2.8*${sin("x*a")} + 0.9*${sin("x*b")}`)}`);
+      out.push(`${atan(`3.1*${sin("x*a")} + 1.2*${sin("x*b*2")}`)}`);
+    }
+    // clicky / noisy impulses but bounded
+    for (const v of noisy){
+      out.push(`${tanh(`3.2*(${v})`)}`);
+      out.push(`${atan(`3.5*(${v})`)}`);
+    }
+    return uniq(out);
+  }
+
+  function makeDrone(){
+    const out = [];
+    for (const v of additive){
+      out.push(`${tanh(`0.8*(${v})`)}`);
+      out.push(`(${v}) + 0.12*${sin("0.03*x*b")}`);
+      out.push(`${tanh(`${v} + 0.07*${sin("x*c")}`)}`);
+    }
+    // slow phase drift vibe
+    out.push(...uniq([
+      `sin(x*a + 0.03*x*b) + 0.15*sin(x*c)`,
+      `tanh(0.6*sin(x*a) + 0.25*sin(x*b) + 0.18*sin(x*c))`,
+      `tanh(sin(x*a) + 0.07*sin(x*b) + 0.05*sin(x*c))`
+    ]));
+    return uniq(out);
+  }
+
+  function makeFX(){
+    const out = [];
+    for (const v of noisy){
+      out.push(v);
+      out.push(`${tanh(`${v} + 0.22*${loga(sin("x*b"))}`)}`);
+      out.push(`${atan(`${v} + 0.25*${powSafe(sin("x*c"), "1.6")}`)}`);
+      out.push(`${tanh(`${v} + 0.18*${divSafe(sin("x*a"), `sin(x*d)+0.2`)} `)}`);
+    }
+    // wilder but still bounded
+    out.push(...uniq([
+      `tanh(sin(x*a + sin(x*b)) + 0.8*sin(x*c))`,
+      `sin(x*a + sin(x*b) + sin(x*c))`,
+      `tanh(1.2*sin(x*a) + b*sin(x*b) + c*sin(x*c))`,
+      `tanh(sin(x*a + 0.7*sin(x*b)) + 0.25*log(abs(sin(x*c))+0.000001))`
+    ]));
+    return uniq(out);
+  }
+
+  // NEW: Bell (inharmonic-ish, “metallic” partials)
+  function makeBell(){
+    const out = [];
+    for (const v of fm){
+      out.push(`${sin(`(${v}) + 0.22*${sin("x*b*sqrt(abs(x)+0.000001)")}`)}`);
+      out.push(`${atan(`1.8*${sin("x*a")} + 0.55*${sin("x*b*1.414")} + 0.28*${sin("x*c*2.236")}`)}`);
+      out.push(`${tanh(`1.6*${sin("x*a")} + 0.35*${powSafe(sin("x*b"), "2.2")}`)}`);
+      out.push(`${sin(`x*a + 0.33*sin(x*b*1.618) + 0.14*sin(x*c*2.414)`)}`);
+    }
+    // bright strike
+    out.push(`${atan(2.2*sin(x*a) + 0.6*sin(x*b*2.414) + 0.25*log(abs(sin(x*c))+0.000001))}`);
+    return uniq(out);
+  }
+
+  // NEW: String (bowed-ish / saw-ish harmonics but bounded)
+  function makeString(){
+    const out = [];
+    // atan(tan()) gives a bounded “wrapped” slope (saw-like) without infinite output
+    for (const v of ["x*a","x*a*2","x*b","x*b*2","x*c"]){
+      out.push(`${atan(`tan(${v})`)}`);
+      out.push(`${tanh(`1.2*atan(tan(${v})) + 0.18*sin(${v}*2)`)}`);
+      out.push(`${atan(`1.6*atan(tan(${v})) + 0.22*sin(x*d)`)}`);
+    }
+    // add gentle FM for “bow noise” vibe
+    for (const v of fm){
+      out.push(`${tanh(`1.1*(${v}) + 0.2*atan(tan(x*a))`)}`);
+      out.push(`${atan(`1.3*(${v}) + 0.15*sin(x*b*3)`)}`);
+    }
+    return uniq(out);
+  }
+
+  const pools = {
+    Bass: makeBass(),
+    Lead: makeLead(),
+    Pad: makePad(),
+    Pluck: makePluck(),
+    Perc: makePerc(),
+    Drone: makeDrone(),
+    FX: makeFX(),
+    Bell: makeBell(),
+    String: makeString()
+  };
+
+  return pools;
+}
+
+/**
+ * Pull the next UNIQUE equation for a type using:
+ * - no-repeat ever (persisted)
+ * - shuffle bag
+ * - recency style avoidance
+ */
+function nextUniqueEquationForType(rng, shuffle, pools, type){
+  const st = shuffle.st;
+
+  // Create/refresh bag if needed
+  if (!st.bagByType[type] || !Array.isArray(st.bagByType[type]) || st.bagByType[type].length === 0){
+    st.bagByType[type] = [];
+    st.idxByType[type] = 0;
+  }
+
+  // If bag exhausted, refill with all not-yet-used eqs (and shuffle)
+  const pool = pools[type] || [];
+  if (st.idxByType[type] >= st.bagByType[type].length){
+    const fresh = [];
+    for (const eq of pool){
+      if (!st.usedEq[eq]) fresh.push(eq);
+    }
+    if (fresh.length === 0){
+      // Hard guarantee: never repeat. If you somehow burn through everything, stop.
+      throw new Error(`No unused equations left for type "${type}". Pool size=${pool.length}.`);
+    }
+
+    // Anti-clustering: sort into style buckets then interleave
+    const buckets = {};
+    for (const eq of fresh){
+      const style = classifyStyle(eq);
+      (buckets[style] ||= []).push(eq);
+    }
+    const styles = Object.keys(buckets);
+    // Shuffle styles and bucket contents deterministically
+    shuffleInPlace(rng, styles);
+    for (const s of styles) shuffleInPlace(rng, buckets[s]);
+
+    // Build interleaved list
+    const bag = [];
+    let remaining = true;
+    while (remaining){
+      remaining = false;
+      for (const s of styles){
+        if (buckets[s].length){
+          bag.push(buckets[s].pop());
+          remaining = true;
+        }
+      }
+    }
+
+    // Extra shuffle pass
+    shuffleInPlace(rng, bag);
+
+    st.bagByType[type] = bag;
+    st.idxByType[type] = 0;
+  }
+
+  // Choose with recency penalty: walk forward until you find something
+  // that isn’t “too similar” to the last few picks.
+  const RECENT_EQ_WINDOW = 40;
+  const RECENT_STYLE_WINDOW = 18;
+
+  const recentEqSet = new Set((st.recentEq || []).slice(-RECENT_EQ_WINDOW));
+  const recentStyle = (st.recentStyle || []).slice(-RECENT_STYLE_WINDOW);
+
+  function stylePenalty(style){
+    // higher penalty if repeated recently
+    let p = 0;
+    for (let i = recentStyle.length - 1, w = 1; i >= 0; i--, w++){
+      if (recentStyle[i].type === type && recentStyle[i].style === style){
+        p += (1 / w); // strong penalty for very recent repeats
+      }
+    }
+    return p;
+  }
+
+  const bag = st.bagByType[type];
+  let cursor = st.idxByType[type];
+
+  // Try a bounded number of attempts from current cursor
+  const MAX_TRIES = Math.min(60, bag.length);
+  let bestIdx = -1;
+  let bestScore = Infinity;
+
+  for (let t = 0; t < MAX_TRIES; t++){
+    const idx = (cursor + t) % bag.length;
+    const eq = bag[idx];
+    if (st.usedEq[eq]) continue; // paranoia
+    if (recentEqSet.has(eq)) continue;
+
+    const style = classifyStyle(eq);
+    // Lower is better: style penalty + slight randomness
+    const score = stylePenalty(style) + (rng() * 0.08);
+
+    if (score < bestScore){
+      bestScore = score;
+      bestIdx = idx;
+      if (bestScore < 0.12) break; // good enough
+    }
+  }
+
+  // Fallback: take the next unused in bag
+  if (bestIdx < 0){
+    for (let t = 0; t < bag.length; t++){
+      const idx = (cursor + t) % bag.length;
+      const eq = bag[idx];
+      if (!st.usedEq[eq] && !recentEqSet.has(eq)){
+        bestIdx = idx;
+        break;
+      }
+    }
+  }
+  if (bestIdx < 0){
+    // As a last resort (still no repeats): scan pool
+    for (const eq of pool){
+      if (!st.usedEq[eq] && !recentEqSet.has(eq)){
+        bestIdx = -2;
+        // accept from pool directly
+        st.usedEq[eq] = 1;
+        st.recentEq = (st.recentEq || []).concat([eq]).slice(-RECENT_EQ_WINDOW);
+        st.recentStyle = (st.recentStyle || []).concat([{type, style: classifyStyle(eq), t: Date.now()}]).slice(-RECENT_STYLE_WINDOW);
+        shuffle.save();
+        return eq;
+      }
+    }
+    throw new Error(`Unable to find a non-repeating equation for type "${type}".`);
+  }
+
+  const chosen = bag[bestIdx];
+  st.usedEq[chosen] = 1;
+
+  // Advance cursor to just after chosen index (so we keep moving forward)
+  st.idxByType[type] = (bestIdx + 1) % bag.length;
+
+  st.recentEq = (st.recentEq || []).concat([chosen]).slice(-RECENT_EQ_WINDOW);
+  st.recentStyle = (st.recentStyle || []).concat([{type, style: classifyStyle(chosen), t: Date.now()}]).slice(-RECENT_STYLE_WINDOW);
+
+  shuffle.save();
+  return chosen;
+}
+/* -------------------------
+   Seeded RNG (optional)
+   ------------------------- */
+function xmur3(str) {
+  let h = 1779033703 ^ str.length;
+  for (let i = 0; i < str.length; i++) {
+    h = Math.imul(h ^ str.charCodeAt(i), 3432918353);
+    h = (h << 13) | (h >>> 19);
+  }
+  return function() {
+    h = Math.imul(h ^ (h >>> 16), 2246822507);
+    h = Math.imul(h ^ (h >>> 13), 3266489909);
+    h ^= h >>> 16;
+    return h >>> 0;
+  };
+}
+function sfc32(a, b, c, d) {
+  return function() {
+    a >>>= 0; b >>>= 0; c >>>= 0; d >>>= 0;
+    let t = (a + b) | 0;
+    a = b ^ (b >>> 9);
+    b = (c + (c << 3)) | 0;
+    c = (c << 21) | (c >>> 11);
+    d = (d + 1) | 0;
+    t = (t + d) | 0;
+    c = (c + t) | 0;
+    return (t >>> 0) / 4294967296;
+  };
+}
+function makeRng(){
+  const seedStr = (document.getElementById("seed").value || "").trim();
+  if (!seedStr) return Math.random;
+  const seed = xmur3(seedStr);
+  return sfc32(seed(), seed(), seed(), seed());
+}
+
+/* -------------------------
+   Defaults / Registry
+   ------------------------- */
+const PARAM_DEFAULTS = {
+  paramA: 0.3840000629425049,
+  paramB: 0.619,
+  paramC: 0.05200004950165749,
+  paramD: -0.295,
+
+  yScale: 1.0,
+  xScale: 1.0,
+  xOffset: 0.2720000743865967,
+  xMirroring: 1.0,
+
+  filterCutoff: 0.5470000505447388,
+  filterResonance: 0.6499999761581421,
+  filterType: 3.0,
+
+  mainVolume: 1.0,
+  oscVolume: 1.0,
+  noiseLevel: 0.0,
+
+  voiceMode: 0.0,
+  glideTime: 0.1000000014901161,
+  oscPitchCoarse: -12.0,
+  oscPitchFine: -27.20000457763672,
+
+  delayEnabled: 1.0,
+  delayWetLevel: 0.5,
+  delayFeedback: 0.5,
+  delayTime: 0.5,
+  delayTimeFormat: 0.0,
+  delayTimeMusical: 7.0,
+  delayStereoOffset: -0.02000001072883606,
+
+  reverbEnabled: 1.0,
+  reverbMix: 0.5,
+  reverbDamping: 0.2999999821186066,
+  reverbRoomSize: 0.699999988079071,
+  reverbHarmonicsLevel: 0.5,
+  reverbHarmonicsMode: 0.0,
+
+  chorusEnabled: 1.0,
+  chorusMix: 0.5,
+  chorusRate: 0.199999988079071,
+  chorusDepth: 0.199999988079071,
+
+  tapeEnabled: 1.0,
+  tapeMix: 1.0,
+  tapeWow: 0.0,
+  tapeFlutter: 0.0,
+  tapeModel: 0.0,
+  tapeSaturation: 0.0,
+  tapeNoise: 0.0,
+
+  env1Attack: 0.005000000353902578,
+  env1Decay: 0.5,
+  env1Sustain: 1.0,
+  env1Release: 0.005000000353902578,
+
+  env2Attack: 0.3840000033378601,
+  env2Decay: 0.5,
+  env2Sustain: 0.0,
+  env2Release: 0.005000000353902578,
+
+  env3Attack: 0.005000000353902578,
+  env3Decay: 0.5,
+  env3Sustain: 1.0,
+  env3Release: 0.005000000353902578,
+
+  lfo1Rate: 0.2,
+  lfo1Shape: 0.0,
+  lfo1Retrigger: 0.0,
+  lfo1RateFormat: 0.0,
+  lfo1Delay: 0.0,
+  lfo1RateMusical: 7.0,
+
+  lfo2Rate: 0.18,
+  lfo2Shape: 0.0,
+  lfo2Retrigger: 1.0,
+  lfo2RateFormat: 0.0,
+  lfo2Delay: 580.0,
+  lfo2RateMusical: 7.0,
+
+  lfo3Rate: 0.5,
+  lfo3Shape: 0.0,
+  lfo3Retrigger: 0.0,
+  lfo3RateFormat: 0.0,
+  lfo3Delay: 600.0,
+  lfo3RateMusical: 7.0,
+
+  paramARangeMin: -9.999953269958496,
+  paramARangeMax: 10.00004768371582,
+  paramBRangeMin: -9.999953269958496,
+  paramBRangeMax: 10.00004768371582,
+  paramCRangeMin: -9.999953269958496,
+  paramCRangeMax: 10.00004768371582,
+  paramDRangeMin: -9.999953269958496,
+  paramDRangeMax: 10.00004768371582,
+  xOffsetRangeMin: -6.282952785491943,
+  xOffsetRangeMax: 6.283047676086426
+};
+
+const PARAM_ORDER = [
+  "paramA","paramB","paramC","paramD",
+  "yScale","xScale","filterCutoff","filterResonance","mainVolume","delayStereoOffset",
+  "reverbDamping","reverbEnabled","reverbMix","reverbRoomSize",
+  "chorusDepth","chorusEnabled","chorusMix","chorusRate",
+  "delayEnabled","delayFeedback","delayTime","delayWetLevel",
+  "env1Attack","env1Decay","env1Release","env1Sustain",
+  "env2Attack","env2Decay","env2Release","env2Sustain",
+  "env3Attack","env3Decay","env3Release","env3Sustain",
+  "lfo1Rate","lfo1Retrigger","lfo1Shape",
+  "lfo2Rate","lfo2Retrigger","lfo2Shape",
+  "lfo3Rate","lfo3Retrigger","lfo3Shape",
+  "xOffset","oscVolume","noiseLevel",
+  "paramARangeMin","paramARangeMax","paramBRangeMin","paramBRangeMax",
+  "paramCRangeMin","paramCRangeMax","paramDRangeMin","paramDRangeMax",
+  "xOffsetRangeMin","xOffsetRangeMax",
+  "xMirroring","voiceMode","glideTime","oscPitchCoarse","oscPitchFine",
+  "filterType","delayTimeFormat","reverbHarmonicsLevel","reverbHarmonicsMode",
+  "tapeEnabled","tapeMix","tapeWow","tapeFlutter","tapeModel","tapeSaturation","tapeNoise",
+  "lfo1RateFormat","lfo1Delay","lfo2RateFormat","lfo2Delay","lfo3RateFormat","lfo3Delay",
+  "delayTimeMusical","lfo1RateMusical","lfo2RateMusical","lfo3RateMusical"
+];
+
+/* -------------------------
+   Mod Matrix
+   ------------------------- */
+const MOD_SOURCES = [
+  "Velocity","ModWheel","Env1","Env2","Env3","LFO1","LFO2","LFO3","MPE Timbre","MPE Pressure"
+];
+const MOD_DESTS = [
+  "Volume","PitchCoarse","PitchFine","ParamA","ParamB","ParamC","ParamD",
+  "XScale","YScale","XOffset","FilterCutoff","FilterRes","Noise"
+];
+const modMatrix = {};
+
+function modKey(srcIndex1based, dstIndex1based){
+  return `mod${String(srcIndex1based).padStart(2,"0")}To${String(dstIndex1based).padStart(2,"0")}Amt`;
+}
+
+(function initModDropdowns(){
+  const srcSel = document.getElementById("modSource");
+  const dstSel = document.getElementById("modDest");
+  MOD_SOURCES.forEach((name, i) => {
+    const o = document.createElement("option");
+    o.value = String(i+1);
+    o.textContent = `${String(i+1).padStart(2,"0")} ${name}`;
+    srcSel.appendChild(o);
+  });
+  MOD_DESTS.forEach((name, i) => {
+    const o = document.createElement("option");
+    o.value = String(i+1);
+    o.textContent = `${String(i+1).padStart(2,"0")} ${name}`;
+    dstSel.appendChild(o);
+  });
+})();
+
+function setModSlot(){
+  const s = parseInt(document.getElementById("modSource").value, 10);
+  const d = parseInt(document.getElementById("modDest").value, 10);
+  const amt = parseFloat(document.getElementById("modAmt_num").value);
+  const key = modKey(s, d);
+  if (Number.isFinite(amt)) modMatrix[key] = amt;
+  renderModView();
+  buildXML();
+}
+function clearModSlot(){
+  const s = parseInt(document.getElementById("modSource").value, 10);
+  const d = parseInt(document.getElementById("modDest").value, 10);
+  delete modMatrix[modKey(s,d)];
+  renderModView();
+  buildXML();
+}
+function clearAllMods(){
+  for (const k of Object.keys(modMatrix)) delete modMatrix[k];
+  renderModView();
+}
+function renderModView(){
+  const div = document.getElementById("modView");
+  const keys = Object.keys(modMatrix).sort();
+  div.textContent = keys.length ? keys.map(k => `${k} = ${modMatrix[k]}`).join("\n") : "No mod slots set.";
+}
+
+/* -------------------------
+   UI binding: range <-> number
+   ------------------------- */
+function bindRangeNumber(id){
+  const r = document.getElementById(id);
+  const n = document.getElementById(id + "_num");
+  if (!r || !n) return;
+
+  const clamp = (val) => {
+    const min = parseFloat(r.min);
+    const max = parseFloat(r.max);
+    if (!Number.isFinite(val)) return parseFloat(r.value);
+    if (Number.isFinite(min)) val = Math.max(min, val);
+    if (Number.isFinite(max)) val = Math.min(max, val);
+    return val;
+  };
+
+  r.addEventListener("input", () => { n.value = r.value; schedulePreview(); scheduleSummary(); });
+  n.addEventListener("input", () => {
+    const v = clamp(parseFloat(n.value));
+    r.value = String(v);
+    schedulePreview(); scheduleSummary();
+  });
+}
+function bindRangeNumberPairs(ids){ ids.forEach(bindRangeNumber); }
+
+bindRangeNumberPairs([
+  "paramA","paramB","paramC","paramD",
+  "xScale","yScale","xOffset",
+  "oscPitchCoarse","oscPitchFine","glideTime",
+  "mainVolume","oscVolume","noiseLevel",
+  "filterCutoff","filterResonance",
+  "env1Attack","env1Decay","env1Sustain","env1Release",
+  "env2Attack","env2Decay","env2Sustain","env2Release",
+  "env3Attack","env3Decay","env3Sustain","env3Release",
+  "lfo1Rate","lfo1Delay","lfo2Rate","lfo2Delay","lfo3Rate","lfo3Delay",
+  "chorusMix","chorusRate","chorusDepth",
+  "delayWetLevel","delayFeedback","delayTime","delayStereoOffset",
+  "reverbMix","reverbDamping","reverbRoomSize","reverbHarmonicsLevel",
+  "tapeMix","tapeWow","tapeFlutter","tapeSaturation","tapeNoise",
+  "modAmt",
+  "delayTimeMusical","lfo1RateMusical","lfo2RateMusical","lfo3RateMusical"
+]);
+
+(function(){
+  const r = document.getElementById("modAmt");
+  const n = document.getElementById("modAmt_num");
+  r.addEventListener("input", ()=> { n.value = r.value; });
+  n.addEventListener("input", ()=> { r.value = n.value; });
+  n.value = "0";
+  r.value = "0";
+})();
+
+function bindSelect(id){
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.addEventListener("change", () => { schedulePreview(); scheduleSummary(); });
+}
+[
+  "mirrorXp","mirrorXm","voiceMode","filterType",
+  "chorusEnabled","delayEnabled","reverbEnabled","tapeEnabled",
+  "delayTimeFormat","reverbHarmonicsMode","tapeModel",
+  "lfo1Shape","lfo2Shape","lfo3Shape",
+  "lfo1Retrigger","lfo2Retrigger","lfo3Retrigger",
+  "lfo1RateFormat","lfo2RateFormat","lfo3RateFormat",
+  "instrType","tuning_enabled"
+].forEach(bindSelect);
+
+document.getElementById("equation").addEventListener("input", ()=> { schedulePreview(); scheduleSummary(); });
+
+/* -------------------------
+   Mirroring helpers
+   ------------------------- */
+function getMirrorBitmask(){
+  let m = 0;
+  if (document.getElementById("mirrorXp").checked) m += 1;
+  if (document.getElementById("mirrorXm").checked) m += 2;
+  return m;
+}
+function setMirrorBitmask(v){
+  const n = parseInt(v, 10) || 0;
+  document.getElementById("mirrorXp").checked = (n & 1) !== 0;
+  document.getElementById("mirrorXm").checked = (n & 2) !== 0;
+}
+
+/* -------------------------
+   XML build/load
+   ------------------------- */
+function escapeXmlAttr(s){
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+function unescapeXml(s){
+  return String(s)
+    .replace(/&quot;/g, '"')
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&");
+}
+function getAttr(tag, name){
+  const r = new RegExp(name + '="([^"]*)"', "i");
+  const m = tag.match(r);
+  return m ? unescapeXml(m[1]) : null;
+}
+function getParamValue(id){
+  if (id === "xMirroring") return getMirrorBitmask();
+  const el = document.getElementById(id);
+  const elNum = document.getElementById(id + "_num");
+  if (!el) return null;
+  if (el.tagName === "SELECT") return el.value;
+  if (el.type === "range" || el.type === "number" || el.type === "text") return el.value;
+  if (elNum) return elNum.value;
+  return el.value;
+}
+function setParamValue(id, value){
+  if (id === "xMirroring") { setMirrorBitmask(value); return; }
+  const el = document.getElementById(id);
+  const elNum = document.getElementById(id + "_num");
+  if (!el && !elNum) return;
+  const s = String(value);
+  if (el && el.tagName === "SELECT") el.value = s;
+  if (el && (el.type === "range" || el.type === "number" || el.type === "text")) el.value = s;
+  if (elNum) elNum.value = s;
+}
+
+function buildXML(){
+  const eq = document.getElementById("equation").value.trim();
+  let xml = '<?xml version="1.0" encoding="UTF-8"?>\n\n';
+  xml += `<EquationsSynth equation="${escapeXmlAttr(eq)}">\n`;
+  const p = (id, value) => { xml += `  <PARAM id="${id}" value="${value}"/>\n`; };
+
+  for (const id of PARAM_ORDER) {
+    const v = getParamValue(id);
+    if (v !== null && v !== undefined && v !== "") p(id, v);
+  }
+
+  const modKeys = Object.keys(modMatrix).sort();
+  for (const k of modKeys) p(k, modMatrix[k]);
+
+  const tEnabled = document.getElementById("tuning_enabled").value;
+  const a69 = document.getElementById("tuning_a69").value;
+  const scl = document.getElementById("tuning_scl").value;
+  const kbm = document.getElementById("tuning_kbm").value;
+
+  xml += `  <tuningSettings enabled="${escapeXmlAttr(tEnabled)}" a69Frequency="${escapeXmlAttr(a69)}" sclPath="${escapeXmlAttr(scl)}" kbmPath="${escapeXmlAttr(kbm)}"/>\n`;
+  xml += `</EquationsSynth>\n`;
+
+  document.getElementById("xmlOut").value = xml;
+  schedulePreview();
+  scheduleSummary();
+}
+
+function copyXML(){
+  const ta = document.getElementById("xmlOut");
+  ta.focus(); ta.select();
+  try { document.execCommand("copy"); } catch(e) {}
+}
+
+function parseXmlParams(xmlText){
+  const eqMatch = xmlText.match(/<EquationsSynth[^>]*\sequation="([^"]*)"/);
+  const equation = eqMatch ? unescapeXml(eqMatch[1]) : null;
+
+  const params = {};
+  const re = /<PARAM\s+id="([^"]+)"\s+value="([^"]*)"\s*\/>/g;
+  let m;
+  while ((m = re.exec(xmlText)) !== null) params[m[1]] = unescapeXml(m[2]);
+
+  const tuning = { enabled:null, a69Frequency:null, sclPath:null, kbmPath:null };
+  const tMatch = xmlText.match(/<tuningSettings[^>]*>/);
+  if (tMatch) {
+    const tag = tMatch[0];
+    tuning.enabled = getAttr(tag, "enabled");
+    tuning.a69Frequency = getAttr(tag, "a69Frequency");
+    tuning.sclPath = getAttr(tag, "sclPath");
+    tuning.kbmPath = getAttr(tag, "kbmPath");
+  }
+  return { equation, params, tuning };
+}
+
+function loadXML(){
+  const xml = document.getElementById("xmlOut").value;
+  if (!xml || !xml.includes("<EquationsSynth")) return;
+
+  const parsed = parseXmlParams(xml);
+  if (parsed.equation !== null) document.getElementById("equation").value = parsed.equation;
+
+  clearAllMods();
+
+  for (const [id, val] of Object.entries(parsed.params)) {
+    if (id.startsWith("mod") && id.includes("To") && id.endsWith("Amt")) {
+      const num = parseFloat(val);
+      if (Number.isFinite(num)) modMatrix[id] = num;
+      continue;
+    }
+    setParamValue(id, val);
+  }
+
+  if (parsed.tuning.enabled !== null) document.getElementById("tuning_enabled").value = parsed.tuning.enabled;
+  if (parsed.tuning.a69Frequency !== null) document.getElementById("tuning_a69").value = parsed.tuning.a69Frequency;
+  if (parsed.tuning.sclPath !== null) document.getElementById("tuning_scl").value = parsed.tuning.sclPath;
+  if (parsed.tuning.kbmPath !== null) document.getElementById("tuning_kbm").value = parsed.tuning.kbmPath;
+
+  renderModView();
+  schedulePreview();
+  scheduleSummary();
+}
+
+/* -------------------------
+   Defaults / Reset
+   ------------------------- */
+function applyDefaults(){
+  document.getElementById("equation").value = 'log(abs(sin(x * a) + 1.1)) * sin(x)';
+  for (const [id, val] of Object.entries(PARAM_DEFAULTS)) setParamValue(id, val);
+  setMirrorBitmask(PARAM_DEFAULTS.xMirroring);
+
+  document.getElementById("tuning_enabled").value = "0";
+  document.getElementById("tuning_a69").value = "440.0";
+  document.getElementById("tuning_scl").value = "";
+  document.getElementById("tuning_kbm").value = "";
+
+  clearAllMods();
+  buildXML();
+}
+
+/* -------------------------
+   Randomize (safe)
+   ------------------------- */
+function rand(rng, min, max){ return min + rng() * (max - min); }
+function round6(x){ return Math.round(x * 1e6) / 1e6; }
+
+function randomizeSafe(){
+  const rng = makeRng();
+
+  const aMin = parseFloat(document.getElementById("paramARangeMin").value);
+  const aMax = parseFloat(document.getElementById("paramARangeMax").value);
+  const bMin = parseFloat(document.getElementById("paramBRangeMin").value);
+  const bMax = parseFloat(document.getElementById("paramBRangeMax").value);
+  const cMin = parseFloat(document.getElementById("paramCRangeMin").value);
+  const cMax = parseFloat(document.getElementById("paramCRangeMax").value);
+  const dMin = parseFloat(document.getElementById("paramDRangeMin").value);
+  const dMax = parseFloat(document.getElementById("paramDRangeMax").value);
+
+  setParamValue("paramA", round6(rand(rng, Number.isFinite(aMin)?aMin:-10, Number.isFinite(aMax)?aMax:10)));
+  setParamValue("paramB", round6(rand(rng, Number.isFinite(bMin)?bMin:-10, Number.isFinite(bMax)?bMax:10)));
+  setParamValue("paramC", round6(rand(rng, Number.isFinite(cMin)?cMin:-10, Number.isFinite(cMax)?cMax:10)));
+  setParamValue("paramD", round6(rand(rng, Number.isFinite(dMin)?dMin:-10, Number.isFinite(dMax)?dMax:10)));
+
+  setParamValue("xScale", round6(rand(rng, 0.25, 2.5)));
+  setParamValue("yScale", round6(rand(rng, 0.25, 2.5)));
+  setParamValue("xOffset", round6(rand(rng, -1.5, 1.5)));
+
+  setMirrorBitmask(Math.floor(rand(rng, 0, 4)));
+
+  setParamValue("filterCutoff", round6(rand(rng, 0.05, 0.95)));
+  setParamValue("filterResonance", round6(rand(rng, 0.0, 0.85)));
+
+  setParamValue("glideTime", round6(rand(rng, 0.0, 0.35)));
+  setParamValue("oscPitchCoarse", round6(Math.round(rand(rng, -24, 24))));
+  setParamValue("oscPitchFine", round6(rand(rng, -40, 40)));
+
+  setParamValue("mainVolume", round6(rand(rng, 0.5, 1.0)));
+  setParamValue("oscVolume", round6(rand(rng, 0.5, 1.0)));
+  setParamValue("noiseLevel", round6(rand(rng, 0.0, 0.25)));
+
+  setParamValue("env1Attack", round6(rand(rng, 0.0, 0.02)));
+  setParamValue("env1Decay", round6(rand(rng, 0.05, 1.5)));
+  setParamValue("env1Sustain", round6(rand(rng, 0.6, 1.0)));
+  setParamValue("env1Release", round6(rand(rng, 0.0, 0.25)));
+
+  setParamValue("env2Attack", round6(rand(rng, 0.0, 0.2)));
+  setParamValue("env2Decay", round6(rand(rng, 0.05, 2.0)));
+  setParamValue("env2Sustain", round6(rand(rng, 0.0, 1.0)));
+  setParamValue("env2Release", round6(rand(rng, 0.0, 0.5)));
+
+  setParamValue("env3Attack", round6(rand(rng, 0.0, 0.1)));
+  setParamValue("env3Decay", round6(rand(rng, 0.05, 2.0)));
+  setParamValue("env3Sustain", round6(rand(rng, 0.0, 1.0)));
+  setParamValue("env3Release", round6(rand(rng, 0.0, 0.6)));
+
+  setParamValue("lfo1Rate", round6(rand(rng, 0.05, 8.0)));
+  setParamValue("lfo2Rate", round6(rand(rng, 0.05, 8.0)));
+  setParamValue("lfo3Rate", round6(rand(rng, 0.05, 8.0)));
+
+  setParamValue("chorusMix", round6(rand(rng, 0.0, 0.65)));
+  setParamValue("chorusRate", round6(rand(rng, 0.05, 0.6)));
+  setParamValue("chorusDepth", round6(rand(rng, 0.0, 0.8)));
+
+  setParamValue("delayWetLevel", round6(rand(rng, 0.0, 0.55)));
+  setParamValue("delayFeedback", round6(rand(rng, 0.1, 0.75)));
+  setParamValue("delayTime", round6(rand(rng, 0.05, 0.8)));
+  setParamValue("delayStereoOffset", round6(rand(rng, -0.25, 0.25)));
+
+  setParamValue("reverbMix", round6(rand(rng, 0.0, 0.6)));
+  setParamValue("reverbDamping", round6(rand(rng, 0.0, 0.9)));
+  setParamValue("reverbRoomSize", round6(rand(rng, 0.1, 1.0)));
+  setParamValue("reverbHarmonicsLevel", round6(rand(rng, 0.0, 0.8)));
+
+  setParamValue("tapeMix", round6(rand(rng, 0.3, 1.0)));
+  setParamValue("tapeWow", round6(rand(rng, 0.0, 0.35)));
+  setParamValue("tapeFlutter", round6(rand(rng, 0.0, 0.35)));
+  setParamValue("tapeSaturation", round6(rand(rng, 0.0, 0.6)));
+  setParamValue("tapeNoise", round6(rand(rng, 0.0, 0.3)));
+
+  clearAllMods();
+  const modCount = Math.floor(rand(rng, 0, 10));
+  for (let i=0;i<modCount;i++){
+    const s = Math.floor(rand(rng, 1, 11));
+    const d = Math.floor(rand(rng, 1, 14));
+    modMatrix[modKey(s,d)] = round6(rand(rng, -0.7, 0.7));
+  }
+  renderModView();
+  buildXML();
+}
+
+/* -------------------------
+   Instrument Generator (more “type-faithful”)
+   - Random stays Random (UI not overwritten)
+   ------------------------- */
+function choose(rng, arr){ return arr[Math.floor(rng() * arr.length)]; }
+function setIf(id, v){ setParamValue(id, v); }
+
+function resetForInstrument(){
+  // Enums that you said are confirmed
+  setIf("voiceMode", 0);
+  setIf("filterType", 3);
+  setIf("delayTimeFormat", 0);
+  setIf("lfo1RateFormat", 0);
+  setIf("lfo2RateFormat", 0);
+  setIf("lfo3RateFormat", 0);
+
+  // Default-ish LFO behavior
+  setIf("lfo1Shape", 0); setIf("lfo2Shape", 0); setIf("lfo3Shape", 0);
+  setIf("lfo1Retrigger", 0); setIf("lfo2Retrigger", 0);
+  setIf("lfo3Retrigger", 0);
+
+  // Clear modulation routing (if present)
+  for (let i=1;i<=3;i++){
+    setIf(`lfo${i}Target`, 0);
+    setIf(`lfo${i}Depth`, 0);
+  }
+  setIf("env2Target", 0);
+  setIf("env2Depth", 0);
+
+  // Reset “normal” synth params you already set (keep whatever you have here)
+  // ---- keep your existing body below this line if you want ----
+
+  // IMPORTANT: Reset advanced randomization ranges to defaults every time
+  // (prevents previous generation from biasing the next one)
+  const rangeIds = [
+    "paramARangeMin","paramARangeMax",
+    "paramBRangeMin","paramBRangeMax",
+    "paramCRangeMin","paramCRangeMax",
+    "paramDRangeMin","paramDRangeMax",
+    "xOffsetRangeMin","xOffsetRangeMax",
+  ];
+  for (const id of rangeIds){
+    if (PARAM_DEFAULTS[id] !== undefined) setIf(id, PARAM_DEFAULTS[id]);
+  }
+}
+
+function generateInstrument(){
+  applyDefaults();
+  const rng = makeRng();
+
+  
+  const typeSel = document.getElementById("instrumentType");
+  const uiChoice = typeSel ? typeSel.value : "Any";
+  const keepUiRandom = (uiChoice === "Random");
+  
+  const eqInput = document.getElementById("equation");
+
+  // novelty gate config
+  const MAX_TRIES = 10;
+  const MIN_DISTANCE = 0.53; // raise = more different, lower = more tolerant
+
+  let lastSig = LAST_INSTRUMENT_SIGNATURE;
+  let best = null;
+
+  for (let attempt = 0; attempt < MAX_TRIES; attempt++){
+    // IMPORTANT: reset baseline so previous generation doesn't bias this one
+    resetForInstrument();
+
+    // --- BEGIN: your existing generateInstrument internals ---
+    // Keep your existing logic that:
+    //  - resolves type (Any/Random -> specific type)
+    //  - picks equation from pool
+    //  - sets params/envelopes/etc
+    //
+    // Only requirement: at the end, eqInput.value must be the chosen equation,
+    // and you should have a variable holding the resolved type name.
+    //
+    // If your current code already has a variable like `resolvedType` or `type`,
+    // set it into `resolvedTypeName` below.
+    // --- END: your existing generateInstrument internals ---
+
+    // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+    // Minimal integration point: infer resolved type from whatever your code uses.
+    // Common pattern in your file: `chosenType` / `type` / `resolvedType`.
+    // Set ONE of these in your existing code, then map here:
+    const resolvedTypeName =
+      (typeof chosenType !== "undefined" && chosenType) ? chosenType :
+      (typeof resolvedType !== "undefined" && resolvedType) ? resolvedType :
+      (typeof type !== "undefined" && type) ? type :
+      uiChoice;
+      document.getElementById("btnBuild")?.click();
+
+    // Tag resolved type so injector can read it (prevents Any/Random -> FX coercion)
+    if (eqInput) eqInput.dataset.resolvedType = String(resolvedTypeName);
+    // <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+
+    // Evaluate novelty
+    const sig = instrumentSignature(eqInput ? eqInput.value : "");
+    const dist = signatureDistance(sig, lastSig);
+
+    if (!best || dist > best.dist) best = { dist, sig };
+
+    // Accept if far enough
+    if (dist >= MIN_DISTANCE){
+      LAST_INSTRUMENT_SIGNATURE = sig;
+      return;
+    }
+
+    // Otherwise: try again.
+    // If the UI choice is Random, keep it Random. If it's fixed, do nothing.
+    if (typeSel && keepUiRandom) typeSel.value = "Random";
+  }
+
+  // fallback: take best we found
+  if (best) LAST_INSTRUMENT_SIGNATURE = best.sig;
+}
+
+/* -------------------------
+   Line Preview (Canvas)
+   ------------------------- */
+function makeEquationFn(expr){
+  const body = `with (Math) { return (${expr}); }`;
+  return new Function("x","a","b","c","d", body);
+}
+
+function applyMirroring(x, mirr){
+  if (mirr === 0) return x;
+  if (mirr === 1) return Math.abs(x);
+  if (mirr === 2) return -Math.abs(x);
+  return Math.abs(x);
+}
+
+function updatePreview(){
+  const canvas = document.getElementById("preview");
+  const ctx = canvas.getContext("2d");
+  const W = canvas.width, H = canvas.height;
+
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle = "#0f1519";
+  ctx.fillRect(0,0,W,H);
+
+  ctx.strokeStyle = "rgba(255,255,255,0.15)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(0, H/2); ctx.lineTo(W, H/2);
+  ctx.moveTo(W/2, 0); ctx.lineTo(W/2, H);
+  ctx.stroke();
+
+  const expr = document.getElementById("equation").value.trim();
+  let fn;
+  try {
+    fn = makeEquationFn(expr);
+  } catch (e) {
+    ctx.fillStyle = "rgba(255,120,120,0.95)";
+    ctx.font = "20px ui-monospace";
+    ctx.fillText("Equation compile error", 20, 40);
+    return;
+  }
+
+  const a = parseFloat(getParamValue("paramA"));
+  const b = parseFloat(getParamValue("paramB"));
+  const c = parseFloat(getParamValue("paramC"));
+  const d = parseFloat(getParamValue("paramD"));
+
+  const xScale = parseFloat(getParamValue("xScale"));
+  const yScale = parseFloat(getParamValue("yScale"));
+  const xOffset = parseFloat(getParamValue("xOffset"));
+  const mirr = getMirrorBitmask();
+
+  const xmin = -Math.PI, xmax = Math.PI;
+  const N = 2000;
+
+  const ys = new Float64Array(N);
+  let yMin = Infinity, yMax = -Infinity;
+  for (let i=0;i<N;i++){
+    const t = i/(N-1);
+    let x = xmin + (xmax - xmin) * t;
+    x = applyMirroring(x, mirr);
+    x = (x * xScale) + xOffset;
+    let y;
+    try {
+      y = fn(x, a, b, c, d);
+      if (!Number.isFinite(y)) y = 0;
+    } catch (e) {
+      y = 0;
+    }
+    y *= yScale;
+    ys[i] = y;
+    if (y < yMin) yMin = y;
+    if (y > yMax) yMax = y;
+  }
+
+  if (!Number.isFinite(yMin) || !Number.isFinite(yMax) || yMin === yMax) {
+    yMin = -1; yMax = 1;
+  }
+  const pad = 0.08*(yMax-yMin);
+  yMin -= pad; yMax += pad;
+
+  ctx.strokeStyle = "rgba(150,255,150,0.95)";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  for (let i=0;i<N;i++){
+    const xPix = (i/(N-1)) * (W-1);
+    const yNorm = (ys[i] - yMin) / (yMax - yMin);
+    const yPix = (1 - yNorm) * (H-1);
+    if (i === 0) ctx.moveTo(xPix, yPix);
+    else ctx.lineTo(xPix, yPix);
+  }
+  ctx.stroke();
+
+  ctx.fillStyle = "rgba(255,255,255,0.65)";
+  ctx.font = "16px ui-monospace, monospace";
+  ctx.fillText("Preview", 14, 22);
+}
+
+let previewTimer = null;
+function schedulePreview(){
+  if (previewTimer) cancelAnimationFrame(previewTimer);
+  previewTimer = requestAnimationFrame(() => { updatePreview(); previewTimer = null; });
+
+renderModView();
+buildXML();
+}
+
+/* -------------------------
+   Patch line display
+   ------------------------- */
+function fmt(x, digits=6){
+  const n = parseFloat(x);
+  if (!Number.isFinite(n)) return String(x);
+  const s = n.toFixed(digits);
+  return s.replace(/(\.\d*?[1-9])0+$/,"$1").replace(/\.0+$/,"");
+}
+
+function buildSummaryLine(){
+  const eq = document.getElementById("equation").value.trim();
+  const a = fmt(getParamValue("paramA"));
+  const b = fmt(getParamValue("paramB"));
+  const c = fmt(getParamValue("paramC"));
+  const d = fmt(getParamValue("paramD"));
+  const xS = fmt(getParamValue("xScale"));
+  const yS = fmt(getParamValue("yScale"));
+  const xO = fmt(getParamValue("xOffset"));
+  const mirr = getMirrorBitmask();
+  const cut = fmt(getParamValue("filterCutoff"));
+  const res = fmt(getParamValue("filterResonance"));
+  const eA = fmt(getParamValue("env1Attack"));
+  const eD = fmt(getParamValue("env1Decay"));
+  const eS = fmt(getParamValue("env1Sustain"));
+  const eR = fmt(getParamValue("env1Release"));
+
+  const fx = [
+    document.getElementById("chorusEnabled").value === "1" ? "Ch" : "Ch(off)",
+    document.getElementById("delayEnabled").value  === "1" ? "Dl" : "Dl(off)",
+    document.getElementById("reverbEnabled").value === "1" ? "Rv" : "Rv(off)",
+    document.getElementById("tapeEnabled").value   === "1" ? "Tp" : "Tp(off)"
+  ].join(" ");
+
+  return `type=${document.getElementById("instrType").value} | a=${a} b=${b} c=${c} d=${d} | xS=${xS} yS=${yS} xO=${xO} mir=${mirr} | cut=${cut} res=${res} | env1 A=${eA} D=${eD} S=${eS} R=${eR} | ${fx} | mods=${Object.keys(modMatrix).length} | eq=${eq}`;
+}
+function updateSummary(){ document.getElementById("summaryLine").textContent = buildSummaryLine(); }
+let summaryTimer = null;
+function scheduleSummary(){
+  if (summaryTimer) cancelAnimationFrame(summaryTimer);
+  summaryTimer = requestAnimationFrame(() => { updateSummary(); summaryTimer = null; });
+}
+function copySummaryLine(){
+  const text = document.getElementById("summaryLine").textContent || "";
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  document.body.appendChild(ta);
+  ta.select();
+  try { document.execCommand("copy"); } catch(e) {}
+  document.body.removeChild(ta);
+}
+
+/* -------------------------
+   Buttons + Keyboard
+   ------------------------- */
+document.getElementById("btnBuild").addEventListener("click", buildXML);
+document.getElementById("btnCopy").addEventListener("click", copyXML);
+document.getElementById("btnLoad").addEventListener("click", loadXML);
+document.getElementById("btnReset").addEventListener("click", applyDefaults);
+document.getElementById("btnRandom").addEventListener("click", randomizeSafe);
+
+document.getElementById("btnSetMod").addEventListener("click", setModSlot);
+document.getElementById("btnClearMod").addEventListener("click", clearModSlot);
+document.getElementById("btnClearAllMods").addEventListener("click", () => { clearAllMods(); buildXML(); });
+
+document.getElementById("btnGenerateInstrument").addEventListener("click", generateInstrument);
+document.getElementById("btnPreview").addEventListener("click", () => { updatePreview(); updateSummary(); });
+document.getElementById("btnCopySummary").addEventListener("click", copySummaryLine);
+
+document.addEventListener("keydown", (e) => {
+  const key = e.key.toLowerCase();
+  const mod = e.ctrlKey || e.metaKey;
+  if (!mod) return;
+
+  // NEW: Ctrl/Cmd+A => select equation field AND copy whitespace-free equation
+  if (key === "a") {
+    e.preventDefault();
+    focusSelectAndCopyEquationNoSpaces();
+    return;
+  }
+
+  // Existing shortcuts
+  if (key === "enter") { e.preventDefault(); randomizeSafe(); return; }
+  if (key === "c") { e.preventDefault(); copyXML(); return; }
+  if (key === "l") { e.preventDefault(); loadXML(); return; }
+  if (key === "b") { e.preventDefault(); buildXML(); return; }
+});
+
+/* -------------------------
+   Init
+   ------------------------- */
+(function init(){
+  applyDefaults();
+  renderModView();
+  updatePreview();
+  updateSummary();
+})();
+</script>
+
+<script src="inject-eq-editor.js"></script>
+</body>
+</html>

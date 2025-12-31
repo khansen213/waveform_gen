@@ -1,0 +1,78 @@
+ :root { --bg:#26323a; --panel:#1f2a31; --border:#4c5c66; --text:#eaeaea; --muted:#b7c0c7; }
+  body { background:var(--bg); color:var(--text); font-family:system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin:16px; }
+  h1 { margin:0 0 12px 0; font-size:20px; }
+  h2 { margin:14px 0 8px 0; font-size:16px; }
+  h3 { margin:10px 0 6px 0; font-size:14px; }
+  .row { display:flex; gap:10px; flex-wrap:wrap; }
+  .panel { background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:10px; margin-bottom:12px; }
+  .col { flex:1 1 340px; min-width:320px; }
+  label { display:block; font-size:12px; color:var(--muted); margin:8px 0 4px; }
+  input[type="text"], input[type="number"], select, textarea {
+    width:100%; box-sizing:border-box; padding:8px;
+    border-radius:6px; border:1px solid var(--border); background:#0f1519; color:var(--text);
+  }
+  input[type="range"] { width:100%; }
+  textarea { height:260px; font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; color:#9bff9b; background:#0b0f0c; }
+  button {
+    border:1px solid var(--border); background:#0f1519; color:var(--text);
+    padding:7px 10px; border-radius:6px; cursor:pointer; margin:4px 6px 4px 0;
+  }
+  button:hover { filter:brightness(1.08); }
+  .grid { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:10px; }
+  .grid3 { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:10px; }
+  .tiny { font-size:11px; color:var(--muted); line-height:1.35; white-space:pre-wrap; }
+  .kv { display:flex; gap:8px; align-items:center; }
+  .kv > .k { min-width:140px; font-size:12px; color:var(--muted); }
+  .kv > .v { flex:1; }
+  .kbd { font-family:ui-monospace, monospace; padding:1px 5px; border:1px solid var(--border); border-radius:5px; background:#0f1519; }
+  canvas { width:100%; height:220px; border:1px solid var(--border); border-radius:8px; background:#0f1519; display:block; }
+  .summaryLine {
+    font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    font-size:12px; color:#d2d2d2; padding:8px; border:1px solid var(--border);
+    border-radius:6px; background:#0f1519; overflow:auto; white-space:nowrap;
+  }
+h1 {
+    margin-top: %;
+}
+ul {
+    display: flex;
+    margin-left: 0;
+    padding: 0;
+    flex-grow: 1;
+}
+
+li {
+    list-style-type: none;
+    padding: 1.5%;
+    background-color: #0b0f0c;
+    transition: background-color .3s ease-in;
+    font-size: 1em;
+    margin: 0;
+}
+
+li:hover, li:hover > a {
+    background-color: #7d11a8;
+    cursor: pointer;
+    height: fit-content;
+}
+
+a {
+    color: #9bff9b;
+    text-decoration: none;
+    background-color: #0b0f0c;
+    transition: background-color .3s ease-in;
+}
+
+a:hover {
+    background-color: #7d11a8;
+}
+
+header {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    background-color: #0b0f0c;
+    margin: 0;
+    padding: 0;
+}

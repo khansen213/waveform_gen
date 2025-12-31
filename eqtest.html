@@ -7,7 +7,7 @@
 <link rel="stylesheet" href="main.css">
 </head>
 <body>
-  <header>
+<header>
   <nav>
     <ul>
       <li><a href="index.html">Attempt 1</a></li>
@@ -15,23 +15,20 @@
     </ul>
   </nav>
 </header>
+<h1>Equations Synth – Preset Generator (Full + Instrument Generator + Line Preview)</h1>
 
-  <h1>Equations Synth – Preset Generator (Full + Instrument Generator + Line Preview)</h1>
-  
-  <div class="row">
-    <div class="panel col">
-      <h2>Instrument Generator + Line Preview</h2>
-      
-      <div class="grid">
-        <div>
-          <label>Instrument Type</label>
-          <select id="instrType">
-            <option value="Any">Any</option>
-            <option value="Bass">Bass</option>
-            <option value="Lead">Lead</option>
-            <option value="Pad">Pad</option>
-          <option value="Bell">Bell</option>
-          <option value="String">String</option>
+<div class="row">
+  <div class="panel col">
+    <h2>Instrument Generator + Line Preview</h2>
+
+    <div class="grid">
+      <div>
+        <label>Instrument Type</label>
+        <select id="instrType">
+          <option value="Any">Any</option>
+          <option value="Bass">Bass</option>
+          <option value="Lead">Lead</option>
+          <option value="Pad">Pad</option>
           <option value="Pluck">Pluck</option>
           <option value="Perc">Perc</option>
           <option value="Drone">Drone</option>
@@ -428,587 +425,6 @@ Destinations: 01 Volume, 02 Pitch(Coarse), 03 Pitch(Fine), 04 A, 05 B, 06 C, 07 
 </div>
 
 <script>
-function stripAllWhitespace(s){
-  return String(s ?? "").replace(/\s+/g, "");
-}
-
-function lsGetJson(key, fallback){
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return fallback;
-    return JSON.parse(raw);
-  } catch {
-    return fallback;
-  }
-}
-function lsSetJson(key, value){
-  try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
-}
-
-/**
- * “Not truly random” shuffle:
- * - Shuffle-bag (no repeats until bag is exhausted)
- * - Recency avoidance (penalize recently used “style groups”)
- *
- * Common names: shuffle bag, anti-clustering shuffle, history-biased shuffle.
- */
-function makeShuffleState(storageKey){
-  const st = lsGetJson(storageKey, {
-    usedEq: {},          // { [eqString]: 1 }
-    bagByType: {},       // { [type]: [eqString, ...] }
-    idxByType: {},       // { [type]: 0 }  (cursor into bag)
-    recentStyle: [],     // [{type, style, t}]
-    recentEq: [],        // [eqString, ...]
-    version: 1
-  });
-  return {
-    st,
-    save(){ lsSetJson(storageKey, st); }
-  };
-}
-
-let LAST_INSTRUMENT_SIGNATURE = null;
-
-function _fv(id){
-  const el = document.getElementById(id);
-  const v = el ? parseFloat(el.value) : NaN;
-  return Number.isFinite(v) ? v : 0;
-}
-
-// compact “sound signature” (cheap proxy for timbre)
-function instrumentSignature(eq){
-  const style = classifyStyle(eq).filter(Boolean).sort().join("|");
-
-  return {
-    style,
-    // most audible macro params
-    filterCutoff: _fv("filterCutoff"),
-    filterResonance: _fv("filterResonance"),
-    filterType: Math.round(_fv("filterType")),
-
-    xScale: _fv("xScale"),
-    yScale: _fv("yScale"),
-    xOffset: _fv("xOffset"),
-    xMirroring: Math.round(_fv("xMirroring")),
-
-    envA: _fv("env1Attack"),
-    envD: _fv("env1Decay"),
-    envS: _fv("env1Sustain"),
-    envR: _fv("env1Release"),
-
-    oscVol: _fv("oscVolume"),
-    noise: _fv("noiseLevel"),
-  };
-}
-
-function _nd(a,b,scale){
-  // normalized absolute difference
-  return Math.min(1, Math.abs(a-b) / (scale || 1));
-}
-
-function signatureDistance(a, b){
-  if (!a || !b) return 1;
-
-  // style penalty: identical style flags makes it “feel” similar even if params differ
-  const styleSame = (a.style === b.style) ? 1 : 0;
-
-  // weight the most audible stuff higher
-  let d = 0;
-  d += 0.30 * _nd(a.filterCutoff, b.filterCutoff, 1);
-  d += 0.25 * _nd(a.filterResonance, b.filterResonance, 1);
-  d += 0.10 * (a.filterType === b.filterType ? 0 : 1);
-
-  d += 0.10 * _nd(a.xScale, b.xScale, 2);
-  d += 0.07 * _nd(a.yScale, b.yScale, 2);
-  d += 0.05 * _nd(a.xOffset, b.xOffset, 2);
-  d += 0.03 * (a.xMirroring === b.xMirroring ? 0 : 1);
-
-  d += 0.03 * _nd(a.envA, b.envA, 2);
-  d += 0.03 * _nd(a.envD, b.envD, 2);
-  d += 0.02 * _nd(a.envS, b.envS, 1);
-  d += 0.03 * _nd(a.envR, b.envR, 2);
-
-  d += 0.02 * _nd(a.oscVol, b.oscVol, 1);
-  d += 0.02 * _nd(a.noise, b.noise, 1);
-
-  // subtract similarity penalty
-  d -= 0.20 * styleSame;
-
-  // clamp 0..1
-  return Math.max(0, Math.min(1, d));
-}
-
-// Stable “style group” tagging from the string itself.
-// Used only to avoid obvious clustering.
-function classifyStyle(eq){
-  const s = String(eq);
-  const flags = [
-    s.includes("tanh(") ? "tanh" : "",
-    s.includes("atan(") ? "atan" : "",
-    s.includes("log(")  ? "log"  : "",
-    s.includes("exp(")  ? "exp"  : "",
-    s.includes("pow(")  ? "pow"  : "",
-    s.includes("tan(")  ? "tan"  : "",
-    s.includes("sqrt(") ? "sqrt" : "",
-    (s.match(/sin\(/g)||[]).length >= 3 ? "multiSin" : "",
-    s.includes("*") ? "mul" : "",
-    s.includes("/") ? "div" : ""
-  ].filter(Boolean);
-  return flags.length ? flags.join("+") : "plain";
-}
-
-// Fisher–Yates shuffle using provided rng()
-function shuffleInPlace(rng, arr){
-  for (let i = arr.length - 1; i > 0; i--){
-    const j = Math.floor(rng() * (i + 1));
-    const t = arr[i]; arr[i] = arr[j]; arr[j] = t;
-  }
-  return arr;
-}
-
-function copyTextToClipboard(text){
-  const s = String(text ?? "");
-  // Prefer modern API
-  if (navigator.clipboard && typeof navigator.clipboard.writeText === "function"){
-    navigator.clipboard.writeText(s).catch(()=>{});
-    return;
-  }
-  // Fallback
-  const ta = document.createElement("textarea");
-  ta.value = s;
-  ta.setAttribute("readonly", "true");
-  ta.style.position = "fixed";
-  ta.style.left = "-9999px";
-  document.body.appendChild(ta);
-  ta.select();
-  try { document.execCommand("copy"); } catch(e) {}
-  document.body.removeChild(ta);
-}
-
-function focusSelectAndCopyEquationNoSpaces(){
-  const eqEl = document.getElementById("equation");
-  if (!eqEl) return;
-  eqEl.focus();
-  eqEl.setSelectionRange(0, eqEl.value.length);
-  copyTextToClipboard(stripAllWhitespace(eqEl.value));
-}
-
-/**
- * Build large, non-patterny template pools programmatically.
- * This avoids maintaining massive hard-coded lists while still producing
- * hundreds of DISTINCT equation strings per instrument.
- */
-function buildInstrumentTemplatePools(){
-  const EPS = "0.000001";
-
-  // Helper pieces (strings)
-  const K1 = ["0.12","0.18","0.22","0.28","0.35","0.42","0.55","0.68","0.85","1.0","1.2","1.5","1.8","2.2","2.6","3.0"];
-  const K2 = ["0.07","0.1","0.14","0.2","0.25","0.3","0.4","0.5","0.6","0.75","0.9","1.1"];
-  const PH = ["0","0.35","0.6","0.9","1.2","1.57","2.1"];
-  const VAR = ["a","b","c","d"];
-  const HARM = ["1","2","3","4","5","6","7","8"];
-
-  const sin = (arg) => `sin(${arg})`;
-  const cos = (arg) => `cos(${arg})`;
-  const tanh = (arg) => `tanh(${arg})`;
-  const atan = (arg) => `atan(${arg})`;
-  const abs = (arg) => `abs(${arg})`;
-  const loga = (arg) => `log(${abs(arg)} + ${EPS})`;
-  const sqrta = (arg) => `sqrt(${abs(arg)} + ${EPS})`;
-  const expSafe = (arg, k) => `exp(tanh(${arg})*${k})`; // bounded exponent input
-  const powSafe = (base, e) => `pow(${abs(base)} + ${EPS}, ${e})`;
-  const divSafe = (num, den) => `((${num})/(abs(${den})+${EPS}))`;
-
-  function uniq(arr){
-    return Array.from(new Set(arr));
-  }
-
-  function combosBasePhase(){
-    const out = [];
-    for (const v of VAR){
-      for (const h of HARM){
-        for (const p of PH){
-          out.push(`x*${v}*${h}+${p}`);
-        }
-      }
-    }
-    return out;
-  }
-
-  const PHASES = combosBasePhase();
-
-  // Core “voices” to recombine
-  function voiceAdditive(depth){
-    const out = [];
-    for (let i=0;i<PHASES.length;i+=Math.max(1, Math.floor(PHASES.length/(18+depth*6)))){
-      const p1 = PHASES[i];
-      const p2 = PHASES[(i+17) % PHASES.length];
-      const p3 = PHASES[(i+41) % PHASES.length];
-      const k1 = K1[(i*3) % K1.length];
-      const k2 = K2[(i*5) % K2.length];
-      out.push(`(${k1}*${sin(p1)} + ${k2}*${sin(p2)} + ${K2[(i*7)%K2.length]}*${sin(p3)})`);
-    }
-    return out;
-  }
-
-  function voiceFM(){
-    const out = [];
-    for (let i=0;i<PHASES.length;i+=Math.max(1, Math.floor(PHASES.length/22))){
-      const car = PHASES[i];
-      const mod = PHASES[(i+29) % PHASES.length];
-      const idx = K2[(i*4) % K2.length];
-      out.push(`${sin(`${car} + ${idx}*${sin(mod)}`)}`);
-      out.push(`${sin(`${car} + ${idx}*${sin(mod)} + ${K2[(i*6)%K2.length]}*${sin(PHASES[(i+7)%PHASES.length])}`)}`);
-    }
-    return out;
-  }
-
-  function voiceAM(){
-    const out = [];
-    for (let i=0;i<PHASES.length;i+=Math.max(1, Math.floor(PHASES.length/24))){
-      const p1 = PHASES[i];
-      const p2 = PHASES[(i+13) % PHASES.length];
-      const amt = K2[(i*3) % K2.length];
-      out.push(`(${sin(p1)} * (1 + ${amt}*${sin(p2)}))`);
-      out.push(`(${sin(p1)} * (1 - ${amt}*${abs(sin(p2))}))`);
-    }
-    return out;
-  }
-
-  function voiceFold(){
-    const out = [];
-    for (let i=0;i<PHASES.length;i+=Math.max(1, Math.floor(PHASES.length/26))){
-      const p = PHASES[i];
-      const drive = K1[(i*2) % K1.length];
-      out.push(`${tanh(`${drive}*${sin(p)}`)}`);
-      out.push(`${atan(`${drive}*${sin(p)} + ${K2[(i*9)%K2.length]}*${sin(PHASES[(i+31)%PHASES.length])}`)}`);
-    }
-    return out;
-  }
-
-  function voiceNoiseLike(){
-    const out = [];
-    for (let i=0;i<PHASES.length;i+=Math.max(1, Math.floor(PHASES.length/30))){
-      const p1 = PHASES[i];
-      const p2 = PHASES[(i+3) % PHASES.length];
-      // deterministic chaos-ish but still bounded
-      out.push(`${tanh(`${sin(p1)} + ${sin(`${p2} + ${sin(p1)}`)} + ${K2[(i*7)%K2.length]}*${sin(PHASES[(i+19)%PHASES.length])}`)}`);
-      out.push(`${atan(`${sin(p1)} + ${cos(`${p2} + ${sin(p1)}`)} + ${K2[(i*11)%K2.length]}*${sin(PHASES[(i+23)%PHASES.length])}`)}`);
-    }
-    return out;
-  }
-
-  // Build per-instrument pools (hundreds each), tuned by “character”.
-  const additive = voiceAdditive(2);
-  const fm = voiceFM();
-  const am = voiceAM();
-  const fold = voiceFold();
-  const noisy = voiceNoiseLike();
-
-  function makeBass(){
-    const out = [];
-    for (const v of fold){
-      out.push(v);
-      out.push(`${tanh(`${v} + 0.22*${sin("x*b*2")}`)}`);
-      out.push(`${atan(`${v} + 0.18*${sin("x*a*3")}`)}`);
-    }
-    // sub reinforcement
-    for (const p of ["x*a","x*a*2","x*b","x*b*2"]){
-      out.push(`${tanh(`${sin(p)} + 0.25*${sin(`${p}*2`)}`)}`);
-      out.push(`${atan(`${sin(p)} + 0.2*${sin(`${p}*3`)}`)}`);
-    }
-    return uniq(out);
-  }
-
-  function makeLead(){
-    const out = [];
-    for (const v of fm){
-      out.push(v);
-      out.push(`${atan(`1.4*(${v})`)}`);
-      out.push(`${tanh(`1.1*(${v}) + 0.18*${sin("x*c*4")}`)}`);
-    }
-    for (const v of am){
-      out.push(`${atan(`1.25*(${v}) + 0.12*${sin("x*d*5")}`)}`);
-    }
-    // bright edge
-    out.push(...uniq([
-      `sin(x*a + 0.35*sin(x*b) + 0.12*sin(x*c*5))`,
-      `atan(1.7*sin(x*a + 0.55*sin(x*b)))`,
-      `tanh(1.3*sin(x*a)*(1+0.45*sin(x*b)))`
-    ]));
-    return uniq(out);
-  }
-
-  function makePad(){
-    const out = [];
-    for (const v of additive){
-      out.push(v);
-      out.push(`${tanh(`0.9*(${v})`)}`);
-      out.push(`${tanh(`(${v}) + 0.12*${sin("x*d")}`)}`);
-      out.push(`(${v} + 0.08*${sin("x*c*0.5")})`);
-    }
-    // gentle smoothing / airy
-    out.push(...uniq([
-      `tanh(0.75*sin(x*a) + 0.55*sin(x*b) + 0.25*sin(x*c))`,
-      `sin(x*a) + 0.6*sin(x*b) + 0.3*sin(x*c) + 0.12*sin(x*d)`,
-      `tanh(sin(x*a + 0.2*sin(x*b)) + 0.18*sin(x*c))`
-    ]));
-    return uniq(out);
-  }
-
-  function makePluck(){
-    const out = [];
-    for (const v of fm){
-      out.push(`(${v}) * ${expSafe(`-abs(${sin("x*b")})`, "1.0")}`);
-      out.push(`(${v}) * (1 - 0.85*abs(${sin("x*c")}))`);
-      out.push(`(${v}) * ${expSafe(`-abs(${sin("x*d*2")})`, "0.85")}`);
-    }
-    // classic pluck-ish shapers
-    out.push(...uniq([
-      `sin(x*a) * exp(-abs(sin(x*b)))`,
-      `sin(x*a) * (1 - 0.85*abs(sin(x*b)))`,
-      `log(abs(sin(x*a) + 1.1)) * sin(x)`
-    ]));
-    return uniq(out);
-  }
-
-  function makePerc(){
-    const out = [];
-    for (const v of fold){
-      out.push(`${tanh(`2.4*(${v})`) } * (1 - abs(${sin("x*b")}))`);
-      out.push(`${sin("x*a")} * ${sin("x*b")} * ${sin("x*c")} `);
-      out.push(`${tanh(`2.8*${sin("x*a")} + 0.9*${sin("x*b")}`)}`);
-      out.push(`${atan(`3.1*${sin("x*a")} + 1.2*${sin("x*b*2")}`)}`);
-    }
-    // clicky / noisy impulses but bounded
-    for (const v of noisy){
-      out.push(`${tanh(`3.2*(${v})`)}`);
-      out.push(`${atan(`3.5*(${v})`)}`);
-    }
-    return uniq(out);
-  }
-
-  function makeDrone(){
-    const out = [];
-    for (const v of additive){
-      out.push(`${tanh(`0.8*(${v})`)}`);
-      out.push(`(${v}) + 0.12*${sin("0.03*x*b")}`);
-      out.push(`${tanh(`${v} + 0.07*${sin("x*c")}`)}`);
-    }
-    // slow phase drift vibe
-    out.push(...uniq([
-      `sin(x*a + 0.03*x*b) + 0.15*sin(x*c)`,
-      `tanh(0.6*sin(x*a) + 0.25*sin(x*b) + 0.18*sin(x*c))`,
-      `tanh(sin(x*a) + 0.07*sin(x*b) + 0.05*sin(x*c))`
-    ]));
-    return uniq(out);
-  }
-
-  function makeFX(){
-    const out = [];
-    for (const v of noisy){
-      out.push(v);
-      out.push(`${tanh(`${v} + 0.22*${loga(sin("x*b"))}`)}`);
-      out.push(`${atan(`${v} + 0.25*${powSafe(sin("x*c"), "1.6")}`)}`);
-      out.push(`${tanh(`${v} + 0.18*${divSafe(sin("x*a"), `sin(x*d)+0.2`)} `)}`);
-    }
-    // wilder but still bounded
-    out.push(...uniq([
-      `tanh(sin(x*a + sin(x*b)) + 0.8*sin(x*c))`,
-      `sin(x*a + sin(x*b) + sin(x*c))`,
-      `tanh(1.2*sin(x*a) + b*sin(x*b) + c*sin(x*c))`,
-      `tanh(sin(x*a + 0.7*sin(x*b)) + 0.25*log(abs(sin(x*c))+0.000001))`
-    ]));
-    return uniq(out);
-  }
-
-  // NEW: Bell (inharmonic-ish, “metallic” partials)
-  function makeBell(){
-    const out = [];
-    for (const v of fm){
-      out.push(`${sin(`(${v}) + 0.22*${sin("x*b*sqrt(abs(x)+0.000001)")}`)}`);
-      out.push(`${atan(`1.8*${sin("x*a")} + 0.55*${sin("x*b*1.414")} + 0.28*${sin("x*c*2.236")}`)}`);
-      out.push(`${tanh(`1.6*${sin("x*a")} + 0.35*${powSafe(sin("x*b"), "2.2")}`)}`);
-      out.push(`${sin(`x*a + 0.33*sin(x*b*1.618) + 0.14*sin(x*c*2.414)`)}`);
-    }
-    // bright strike
-    out.push(`${atan(2.2*sin(x*a) + 0.6*sin(x*b*2.414) + 0.25*log(abs(sin(x*c))+0.000001))}`);
-    return uniq(out);
-  }
-
-  // NEW: String (bowed-ish / saw-ish harmonics but bounded)
-  function makeString(){
-    const out = [];
-    // atan(tan()) gives a bounded “wrapped” slope (saw-like) without infinite output
-    for (const v of ["x*a","x*a*2","x*b","x*b*2","x*c"]){
-      out.push(`${atan(`tan(${v})`)}`);
-      out.push(`${tanh(`1.2*atan(tan(${v})) + 0.18*sin(${v}*2)`)}`);
-      out.push(`${atan(`1.6*atan(tan(${v})) + 0.22*sin(x*d)`)}`);
-    }
-    // add gentle FM for “bow noise” vibe
-    for (const v of fm){
-      out.push(`${tanh(`1.1*(${v}) + 0.2*atan(tan(x*a))`)}`);
-      out.push(`${atan(`1.3*(${v}) + 0.15*sin(x*b*3)`)}`);
-    }
-    return uniq(out);
-  }
-
-  const pools = {
-    Bass: makeBass(),
-    Lead: makeLead(),
-    Pad: makePad(),
-    Pluck: makePluck(),
-    Perc: makePerc(),
-    Drone: makeDrone(),
-    FX: makeFX(),
-    Bell: makeBell(),
-    String: makeString()
-  };
-
-  return pools;
-}
-
-/**
- * Pull the next UNIQUE equation for a type using:
- * - no-repeat ever (persisted)
- * - shuffle bag
- * - recency style avoidance
- */
-function nextUniqueEquationForType(rng, shuffle, pools, type){
-  const st = shuffle.st;
-
-  // Create/refresh bag if needed
-  if (!st.bagByType[type] || !Array.isArray(st.bagByType[type]) || st.bagByType[type].length === 0){
-    st.bagByType[type] = [];
-    st.idxByType[type] = 0;
-  }
-
-  // If bag exhausted, refill with all not-yet-used eqs (and shuffle)
-  const pool = pools[type] || [];
-  if (st.idxByType[type] >= st.bagByType[type].length){
-    const fresh = [];
-    for (const eq of pool){
-      if (!st.usedEq[eq]) fresh.push(eq);
-    }
-    if (fresh.length === 0){
-      // Hard guarantee: never repeat. If you somehow burn through everything, stop.
-      throw new Error(`No unused equations left for type "${type}". Pool size=${pool.length}.`);
-    }
-
-    // Anti-clustering: sort into style buckets then interleave
-    const buckets = {};
-    for (const eq of fresh){
-      const style = classifyStyle(eq);
-      (buckets[style] ||= []).push(eq);
-    }
-    const styles = Object.keys(buckets);
-    // Shuffle styles and bucket contents deterministically
-    shuffleInPlace(rng, styles);
-    for (const s of styles) shuffleInPlace(rng, buckets[s]);
-
-    // Build interleaved list
-    const bag = [];
-    let remaining = true;
-    while (remaining){
-      remaining = false;
-      for (const s of styles){
-        if (buckets[s].length){
-          bag.push(buckets[s].pop());
-          remaining = true;
-        }
-      }
-    }
-
-    // Extra shuffle pass
-    shuffleInPlace(rng, bag);
-
-    st.bagByType[type] = bag;
-    st.idxByType[type] = 0;
-  }
-
-  // Choose with recency penalty: walk forward until you find something
-  // that isn’t “too similar” to the last few picks.
-  const RECENT_EQ_WINDOW = 40;
-  const RECENT_STYLE_WINDOW = 18;
-
-  const recentEqSet = new Set((st.recentEq || []).slice(-RECENT_EQ_WINDOW));
-  const recentStyle = (st.recentStyle || []).slice(-RECENT_STYLE_WINDOW);
-
-  function stylePenalty(style){
-    // higher penalty if repeated recently
-    let p = 0;
-    for (let i = recentStyle.length - 1, w = 1; i >= 0; i--, w++){
-      if (recentStyle[i].type === type && recentStyle[i].style === style){
-        p += (1 / w); // strong penalty for very recent repeats
-      }
-    }
-    return p;
-  }
-
-  const bag = st.bagByType[type];
-  let cursor = st.idxByType[type];
-
-  // Try a bounded number of attempts from current cursor
-  const MAX_TRIES = Math.min(60, bag.length);
-  let bestIdx = -1;
-  let bestScore = Infinity;
-
-  for (let t = 0; t < MAX_TRIES; t++){
-    const idx = (cursor + t) % bag.length;
-    const eq = bag[idx];
-    if (st.usedEq[eq]) continue; // paranoia
-    if (recentEqSet.has(eq)) continue;
-
-    const style = classifyStyle(eq);
-    // Lower is better: style penalty + slight randomness
-    const score = stylePenalty(style) + (rng() * 0.08);
-
-    if (score < bestScore){
-      bestScore = score;
-      bestIdx = idx;
-      if (bestScore < 0.12) break; // good enough
-    }
-  }
-
-  // Fallback: take the next unused in bag
-  if (bestIdx < 0){
-    for (let t = 0; t < bag.length; t++){
-      const idx = (cursor + t) % bag.length;
-      const eq = bag[idx];
-      if (!st.usedEq[eq] && !recentEqSet.has(eq)){
-        bestIdx = idx;
-        break;
-      }
-    }
-  }
-  if (bestIdx < 0){
-    // As a last resort (still no repeats): scan pool
-    for (const eq of pool){
-      if (!st.usedEq[eq] && !recentEqSet.has(eq)){
-        bestIdx = -2;
-        // accept from pool directly
-        st.usedEq[eq] = 1;
-        st.recentEq = (st.recentEq || []).concat([eq]).slice(-RECENT_EQ_WINDOW);
-        st.recentStyle = (st.recentStyle || []).concat([{type, style: classifyStyle(eq), t: Date.now()}]).slice(-RECENT_STYLE_WINDOW);
-        shuffle.save();
-        return eq;
-      }
-    }
-    throw new Error(`Unable to find a non-repeating equation for type "${type}".`);
-  }
-
-  const chosen = bag[bestIdx];
-  st.usedEq[chosen] = 1;
-
-  // Advance cursor to just after chosen index (so we keep moving forward)
-  st.idxByType[type] = (bestIdx + 1) % bag.length;
-
-  st.recentEq = (st.recentEq || []).concat([chosen]).slice(-RECENT_EQ_WINDOW);
-  st.recentStyle = (st.recentStyle || []).concat([{type, style: classifyStyle(chosen), t: Date.now()}]).slice(-RECENT_STYLE_WINDOW);
-
-  shuffle.save();
-  return chosen;
-}
 /* -------------------------
    Seeded RNG (optional)
    ------------------------- */
@@ -1057,7 +473,7 @@ const PARAM_DEFAULTS = {
   yScale: 1.0,
   xScale: 1.0,
   xOffset: 0.2720000743865967,
-  xMirroring: 0, // set to 0 to stop line mirroring
+  xMirroring: 0.0,
 
   filterCutoff: 0.5470000505447388,
   filterResonance: 0.6499999761581421,
@@ -1484,6 +900,8 @@ function randomizeSafe(){
   setParamValue("yScale", round6(rand(rng, 0.25, 2.5)));
   setParamValue("xOffset", round6(rand(rng, -1.5, 1.5)));
 
+  setMirrorBitmask(Math.floor(rand(rng, 0, 4)));
+
   setParamValue("filterCutoff", round6(rand(rng, 0.05, 0.95)));
   setParamValue("filterResonance", round6(rand(rng, 0.0, 0.85)));
 
@@ -1563,103 +981,338 @@ function resetForInstrument(){
 
   // Default-ish LFO behavior
   setIf("lfo1Shape", 0); setIf("lfo2Shape", 0); setIf("lfo3Shape", 0);
-  setIf("lfo1Retrigger", 0); setIf("lfo2Retrigger", 0);
-  setIf("lfo3Retrigger", 0);
+  setIf("lfo1Retrigger", 0); setIf("lfo2Retrigger", 0); setIf("lfo3Retrigger", 0);
 
-  // Clear modulation routing (if present)
-  for (let i=1;i<=3;i++){
-    setIf(`lfo${i}Target`, 0);
-    setIf(`lfo${i}Depth`, 0);
-  }
-  setIf("env2Target", 0);
-  setIf("env2Depth", 0);
+  // Keep output sane
+  setIf("mainVolume", 0.95);
+  setIf("oscVolume", 0.95);
+  setIf("noiseLevel", 0.03);
 
-  // Reset “normal” synth params you already set (keep whatever you have here)
-  // ---- keep your existing body below this line if you want ----
+  // FX default off, types enable explicitly
+  setIf("chorusEnabled", 0);
+  setIf("delayEnabled", 0);
+  setIf("reverbEnabled", 0);
+  setIf("tapeEnabled", 0);
 
-  // IMPORTANT: Reset advanced randomization ranges to defaults every time
-  // (prevents previous generation from biasing the next one)
-  const rangeIds = [
-    "paramARangeMin","paramARangeMax",
-    "paramBRangeMin","paramBRangeMax",
-    "paramCRangeMin","paramCRangeMax",
-    "paramDRangeMin","paramDRangeMax",
-    "xOffsetRangeMin","xOffsetRangeMax",
-  ];
-  for (const id of rangeIds){
-    if (PARAM_DEFAULTS[id] !== undefined) setIf(id, PARAM_DEFAULTS[id]);
-  }
+  clearAllMods();
 }
 
 function generateInstrument(){
-  applyDefaults();
   const rng = makeRng();
-
-  
-  const typeSel = document.getElementById("instrumentType");
-  const uiChoice = typeSel ? typeSel.value : "Any";
+  const typeSel = document.getElementById("instrType");
+  const uiChoice = typeSel.value;
   const keepUiRandom = (uiChoice === "Random");
-  
-  const eqInput = document.getElementById("equation");
 
-  // novelty gate config
-  const MAX_TRIES = 10;
-  const MIN_DISTANCE = 0.53; // raise = more different, lower = more tolerant
+  let t = uiChoice;
+  if (t === "Any" || t === "Random") t = choose(rng, ["Bass","Lead","Pad","Pluck","Perc","Drone","FX"]);
 
-  let lastSig = LAST_INSTRUMENT_SIGNATURE;
-  let best = null;
+  resetForInstrument();
 
-  for (let attempt = 0; attempt < MAX_TRIES; attempt++){
-    // IMPORTANT: reset baseline so previous generation doesn't bias this one
-    resetForInstrument();
+  // Use mostly continuous/bounded equations (fewer “broken” artifacts)
+  const templates = {
+    Bass: [
+      "tanh(1.8*sin(x*a) + 0.35*sin(x*b))",
+      "atan(2.2*sin(x*a) + 0.25*sin(2*x*a))",
+      "tanh(sin(x*a) + 0.2*sin(2*x*a) + 0.1*sin(3*x*a))"
+    ],
+    Lead: [
+      "atan(1.6*(sin(x*a + 0.6*sin(x*b))))",
+      "tanh(1.2*sin(x*a) * (1 + 0.35*sin(x*b)))",
+      "sin(x*a + 0.35*sin(x*b))"
+    ],
+    Pad: [
+      "tanh(0.9*sin(x*a) + 0.5*sin(x*b) + 0.25*sin(x*c))",
+      "sin(x*a) + 0.6*sin(x*b) + 0.25*sin(x*c)",
+      "tanh(sin(x*a + 0.2*sin(x*b)) + 0.15*sin(x*c))"
+    ],
+    Pluck: [
+      "sin(x*a) * exp(-abs(sin(x*b)))",
+      "sin(x*a) * (1 - 0.85*abs(sin(x*b)))",
+      "log(abs(sin(x*a) + 1.1)) * sin(x)"
+    ],
+    Perc: [
+      "tanh(3*sin(x*a)) * (1 - abs(sin(x*b)))",
+      "sin(x*a) * sin(x*b) * sin(x*c)",
+      "tanh(2.5*sin(x*a) + 0.8*sin(x*b))"
+    ],
+    Drone: [
+      "tanh(0.6*sin(x*a) + 0.25*sin(x*b) + 0.18*sin(x*c))",
+      "sin(x*a + 0.03*x*b) + 0.15*sin(x*c)",
+      "tanh(sin(x*a) + 0.07*sin(x*b) + 0.05*sin(x*c))"
+    ],
+    FX: [
+      "tanh(sin(x*a + sin(x*b)) + 0.8*sin(x*c))",
+      "sin(x*a + sin(x*b) + sin(x*c))",
+      "tanh(1.2*sin(x*a) + b*sin(x*b) + c*sin(x*c))"
+    ]
+  };
 
-    // --- BEGIN: your existing generateInstrument internals ---
-    // Keep your existing logic that:
-    //  - resolves type (Any/Random -> specific type)
-    //  - picks equation from pool
-    //  - sets params/envelopes/etc
-    //
-    // Only requirement: at the end, eqInput.value must be the chosen equation,
-    // and you should have a variable holding the resolved type name.
-    //
-    // If your current code already has a variable like `resolvedType` or `type`,
-    // set it into `resolvedTypeName` below.
-    // --- END: your existing generateInstrument internals ---
+  document.getElementById("equation").value = choose(rng, templates[t] || templates.Pad);
 
-    // >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
-    // Minimal integration point: infer resolved type from whatever your code uses.
-    // Common pattern in your file: `chosenType` / `type` / `resolvedType`.
-    // Set ONE of these in your existing code, then map here:
-    const resolvedTypeName =
-      (typeof chosenType !== "undefined" && chosenType) ? chosenType :
-      (typeof resolvedType !== "undefined" && resolvedType) ? resolvedType :
-      (typeof type !== "undefined" && type) ? type :
-      uiChoice;
-      document.getElementById("btnBuild")?.click();
+  // Common “safe” oscillator mapping defaults
+  setIf("paramA", round6(rand(rng, 0.6, 3.0)));
+  setIf("paramB", round6(rand(rng, 0.2, 2.5)));
+  setIf("paramC", round6(rand(rng, -1.0, 1.0)));
+  setIf("paramD", round6(rand(rng, -1.0, 1.0)));
 
-    // Tag resolved type so injector can read it (prevents Any/Random -> FX coercion)
-    if (eqInput) eqInput.dataset.resolvedType = String(resolvedTypeName);
-    // <<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<<
+  // Graph defaults
+  setMirrorBitmask(choose(rng, [0,1,3]));
+  setIf("xScale", round6(rand(rng, 0.6, 1.8)));
+  setIf("yScale", round6(rand(rng, 0.8, 1.6)));
+  setIf("xOffset", round6(rand(rng, -0.4, 0.4)));
 
-    // Evaluate novelty
-    const sig = instrumentSignature(eqInput ? eqInput.value : "");
-    const dist = signatureDistance(sig, lastSig);
+  // Pitch defaults
+  setIf("oscPitchCoarse", 0);
+  setIf("oscPitchFine", round6(rand(rng, -6, 6)));
+  setIf("glideTime", 0);
 
-    if (!best || dist > best.dist) best = { dist, sig };
+  // Filter defaults
+  setIf("filterCutoff", round6(rand(rng, 0.18, 0.65)));
+  setIf("filterResonance", round6(rand(rng, 0.05, 0.45)));
 
-    // Accept if far enough
-    if (dist >= MIN_DISTANCE){
-      LAST_INSTRUMENT_SIGNATURE = sig;
-      return;
-    }
+  // Envelope defaults (overridden per type)
+  setIf("env1Attack", 0.01);
+  setIf("env1Decay", 0.5);
+  setIf("env1Sustain", 0.8);
+  setIf("env1Release", 0.2);
 
-    // Otherwise: try again.
-    // If the UI choice is Random, keep it Random. If it's fixed, do nothing.
-    if (typeSel && keepUiRandom) typeSel.value = "Random";
+  // ------------------ Type rules ------------------
+
+  if (t === "Bass") {
+    setIf("oscPitchCoarse", choose(rng, [-24,-12]));
+    setIf("glideTime", round6(rand(rng, 0.0, 0.08)));
+
+    setMirrorBitmask(0);
+    setIf("xScale", round6(rand(rng, 0.55, 1.25)));
+    setIf("yScale", round6(rand(rng, 0.95, 1.7)));
+    setIf("xOffset", round6(rand(rng, -0.2, 0.2)));
+
+    setIf("filterCutoff", round6(rand(rng, 0.06, 0.28)));
+    setIf("filterResonance", round6(rand(rng, 0.05, 0.35)));
+
+    setIf("env1Attack", round6(rand(rng, 0.0, 0.008)));
+    setIf("env1Decay", round6(rand(rng, 0.10, 0.45)));
+    setIf("env1Sustain", round6(rand(rng, 0.70, 1.0)));
+    setIf("env1Release", round6(rand(rng, 0.03, 0.18)));
+
+    // Drive stand-in
+    setIf("tapeEnabled", 1);
+    setIf("tapeMix", 1);
+    setIf("tapeSaturation", round6(rand(rng, 0.20, 0.60)));
+    setIf("tapeNoise", round6(rand(rng, 0.0, 0.10)));
+
+    // Env2 -> cutoff small movement (source 4 Env2 -> dest 11 cutoff)
+    modMatrix[modKey(4,11)] = round6(rand(rng, 0.12, 0.30));
   }
 
-  // fallback: take best we found
-  if (best) LAST_INSTRUMENT_SIGNATURE = best.sig;
+  else if (t === "Lead") {
+    setIf("oscPitchCoarse", choose(rng, [0,12]));
+    setIf("glideTime", round6(rand(rng, 0.02, 0.18)));
+
+    setMirrorBitmask(choose(rng, [0,1,3]));
+    setIf("xScale", round6(rand(rng, 0.9, 2.3)));
+    setIf("yScale", round6(rand(rng, 0.9, 1.9)));
+    setIf("xOffset", round6(rand(rng, -0.6, 0.6)));
+
+    setIf("filterCutoff", round6(rand(rng, 0.35, 0.85)));
+    setIf("filterResonance", round6(rand(rng, 0.10, 0.65)));
+
+    setIf("env1Attack", round6(rand(rng, 0.0, 0.02)));
+    setIf("env1Decay", round6(rand(rng, 0.05, 0.55)));
+    setIf("env1Sustain", round6(rand(rng, 0.55, 1.0)));
+    setIf("env1Release", round6(rand(rng, 0.08, 0.65)));
+
+    // Vibrato via LFO1 -> PitchFine (source 6 LFO1 -> dest 03 PitchFine)
+    setIf("lfo1Rate", round6(rand(rng, 5.5, 8.0)));
+    setIf("lfo1Delay", round6(rand(rng, 0.08, 0.30)));
+    modMatrix[modKey(6,3)] = round6(rand(rng, 0.05, 0.16));
+
+    // Time FX
+    setIf("delayEnabled", 1);
+    setIf("delayWetLevel", round6(rand(rng, 0.08, 0.32)));
+    setIf("delayFeedback", round6(rand(rng, 0.18, 0.55)));
+    setIf("delayTime", round6(rand(rng, 0.12, 0.55)));
+    setIf("delayStereoOffset", round6(rand(rng, -0.18, 0.18)));
+
+    setIf("reverbEnabled", choose(rng, [0,1]));
+    setIf("reverbMix", round6(rand(rng, 0.06, 0.28)));
+    setIf("reverbRoomSize", round6(rand(rng, 0.35, 0.85)));
+  }
+
+  else if (t === "Pad") {
+    setIf("oscPitchCoarse", 0);
+
+    setMirrorBitmask(choose(rng, [1,3]));
+    setIf("xScale", round6(rand(rng, 0.35, 1.1)));
+    setIf("yScale", round6(rand(rng, 0.55, 1.25)));
+    setIf("xOffset", round6(rand(rng, -0.6, 0.6)));
+
+    setIf("filterCutoff", round6(rand(rng, 0.12, 0.45)));
+    setIf("filterResonance", round6(rand(rng, 0.03, 0.28)));
+
+    // Slow amp envelope
+    setIf("env1Attack", round6(rand(rng, 0.25, 3.5)));
+    setIf("env1Decay", round6(rand(rng, 0.4, 4.5)));
+    setIf("env1Sustain", round6(rand(rng, 0.7, 1.0)));
+    setIf("env1Release", round6(rand(rng, 0.6, 7.5)));
+
+    // Movement
+    setIf("chorusEnabled", 1);
+    setIf("chorusMix", round6(rand(rng, 0.18, 0.65)));
+    setIf("chorusRate", round6(rand(rng, 0.05, 0.35)));
+    setIf("chorusDepth", round6(rand(rng, 0.25, 0.85)));
+
+    setIf("reverbEnabled", 1);
+    setIf("reverbMix", round6(rand(rng, 0.25, 0.75)));
+    setIf("reverbRoomSize", round6(rand(rng, 0.55, 1.0)));
+    setIf("reverbDamping", round6(rand(rng, 0.15, 0.75)));
+
+    // LFO2 -> cutoff gentle drift
+    setIf("lfo2Rate", round6(rand(rng, 0.04, 0.22)));
+    setIf("lfo2Delay", 0);
+    modMatrix[modKey(7,11)] = round6(rand(rng, 0.10, 0.28));
+  }
+
+  else if (t === "Pluck") {
+    setIf("oscPitchCoarse", choose(rng, [0,12]));
+
+    setMirrorBitmask(choose(rng, [0,1]));
+    setIf("xScale", round6(rand(rng, 0.95, 2.6)));
+    setIf("yScale", round6(rand(rng, 0.85, 2.1)));
+    setIf("xOffset", round6(rand(rng, -0.22, 0.22)));
+
+    // “Brightness decays” feel: cutoff moderate + envelope/mod to cutoff
+    setIf("filterCutoff", round6(rand(rng, 0.22, 0.62)));
+    setIf("filterResonance", round6(rand(rng, 0.08, 0.55)));
+
+    // Short amp env, low sustain
+    setIf("env1Attack", round6(rand(rng, 0.0, 0.008)));
+    setIf("env1Decay", round6(rand(rng, 0.05, 0.70)));
+    setIf("env1Sustain", round6(rand(rng, 0.0, 0.25)));
+    setIf("env1Release", round6(rand(rng, 0.02, 0.45)));
+
+    // Env2 -> cutoff “pluck” articulation
+    modMatrix[modKey(4,11)] = round6(rand(rng, 0.20, 0.55));
+
+    // Delay/reverb usually on (light)
+    setIf("delayEnabled", 1);
+    setIf("delayWetLevel", round6(rand(rng, 0.12, 0.45)));
+    setIf("delayFeedback", round6(rand(rng, 0.20, 0.62)));
+    setIf("delayTime", round6(rand(rng, 0.16, 0.60)));
+    setIf("delayStereoOffset", round6(rand(rng, -0.20, 0.20)));
+
+    setIf("reverbEnabled", 1);
+    setIf("reverbMix", round6(rand(rng, 0.10, 0.40)));
+    setIf("reverbRoomSize", round6(rand(rng, 0.35, 0.90)));
+  }
+
+  else if (t === "Perc") {
+    setIf("oscPitchCoarse", choose(rng, [0,12,24]));
+    setMirrorBitmask(0);
+
+    setIf("xScale", round6(rand(rng, 1.4, 3.8)));
+    setIf("yScale", round6(rand(rng, 0.9, 2.6)));
+    setIf("xOffset", round6(rand(rng, -0.18, 0.18)));
+
+    setIf("filterCutoff", round6(rand(rng, 0.45, 0.95)));
+    setIf("filterResonance", round6(rand(rng, 0.0, 0.25)));
+
+    // Very short env
+    setIf("env1Attack", 0);
+    setIf("env1Decay", round6(rand(rng, 0.02, 0.30)));
+    setIf("env1Sustain", 0);
+    setIf("env1Release", round6(rand(rng, 0.02, 0.22)));
+
+    // A bit more noise acceptable for percussion
+    setIf("noiseLevel", round6(rand(rng, 0.02, 0.18)));
+
+    // FX mostly off; sometimes a touch of reverb
+    setIf("reverbEnabled", choose(rng, [0,0,1]));
+    if (document.getElementById("reverbEnabled").value === "1") {
+      setIf("reverbMix", round6(rand(rng, 0.03, 0.20)));
+      setIf("reverbRoomSize", round6(rand(rng, 0.30, 0.80)));
+    }
+  }
+
+  else if (t === "Drone") {
+    setIf("oscPitchCoarse", choose(rng, [-12,0]));
+
+    setMirrorBitmask(3);
+    setIf("xScale", round6(rand(rng, 0.15, 0.75)));
+    setIf("yScale", round6(rand(rng, 0.45, 1.20)));
+    setIf("xOffset", round6(rand(rng, -1.2, 1.2)));
+
+    setIf("filterCutoff", round6(rand(rng, 0.06, 0.32)));
+    setIf("filterResonance", round6(rand(rng, 0.03, 0.25)));
+
+    // Long amp envelope
+    setIf("env1Attack", round6(rand(rng, 1.2, 7.0)));
+    setIf("env1Decay", round6(rand(rng, 0.8, 7.0)));
+    setIf("env1Sustain", round6(rand(rng, 0.75, 1.0)));
+    setIf("env1Release", round6(rand(rng, 1.5, 10.0)));
+
+    // Big space
+    setIf("reverbEnabled", 1);
+    setIf("reverbMix", round6(rand(rng, 0.35, 0.85)));
+    setIf("reverbRoomSize", round6(rand(rng, 0.65, 1.0)));
+    setIf("reverbDamping", round6(rand(rng, 0.10, 0.70)));
+
+    setIf("chorusEnabled", 1);
+    setIf("chorusMix", round6(rand(rng, 0.18, 0.70)));
+    setIf("chorusRate", round6(rand(rng, 0.03, 0.20)));
+    setIf("chorusDepth", round6(rand(rng, 0.25, 0.85)));
+
+    // LFO3 -> xOffset slow drift
+    setIf("lfo3Rate", round6(rand(rng, 0.01, 0.08)));
+    setIf("lfo3Delay", 0);
+    modMatrix[modKey(8,10)] = round6(rand(rng, 0.15, 0.40));
+  }
+
+  else if (t === "FX") {
+    // FX: allow wilder ranges + more modulation + more noise
+    setIf("noiseLevel", round6(rand(rng, 0.03, 0.35)));
+    setIf("oscPitchCoarse", choose(rng, [-12,0,12,24]));
+    setIf("glideTime", round6(rand(rng, 0.0, 0.25)));
+
+    setMirrorBitmask(choose(rng, [0,1,2,3]));
+    setIf("xScale", round6(rand(rng, 0.2, 4.5)));
+    setIf("yScale", round6(rand(rng, 0.2, 4.5)));
+    setIf("xOffset", round6(rand(rng, -3.0, 3.0)));
+
+    setIf("filterCutoff", round6(rand(rng, 0.05, 0.95)));
+    setIf("filterResonance", round6(rand(rng, 0.0, 0.90)));
+
+    setIf("delayEnabled", 1);
+    setIf("delayWetLevel", round6(rand(rng, 0.20, 0.85)));
+    setIf("delayFeedback", round6(rand(rng, 0.20, 0.88)));
+    setIf("delayTime", round6(rand(rng, 0.05, 0.95)));
+    setIf("delayStereoOffset", round6(rand(rng, -0.35, 0.35)));
+
+    setIf("reverbEnabled", 1);
+    setIf("reverbMix", round6(rand(rng, 0.25, 0.95)));
+    setIf("reverbRoomSize", round6(rand(rng, 0.30, 1.0)));
+
+    setIf("tapeEnabled", 1);
+    setIf("tapeMix", round6(rand(rng, 0.50, 1.0)));
+    setIf("tapeSaturation", round6(rand(rng, 0.0, 0.95)));
+    setIf("tapeWow", round6(rand(rng, 0.0, 0.45)));
+    setIf("tapeFlutter", round6(rand(rng, 0.0, 0.45)));
+    setIf("tapeNoise", round6(rand(rng, 0.0, 0.55)));
+
+    // Modulation “splashes”
+    const splashes = Math.floor(rand(rng, 3, 12));
+    for (let i=0;i<splashes;i++){
+      const s = Math.floor(rand(rng, 1, 11));
+      const d = Math.floor(rand(rng, 1, 14));
+      modMatrix[modKey(s,d)] = round6(rand(rng, -1.0, 1.0));
+    }
+  }
+
+  // Keep UI random if user chose Random; otherwise reflect chosen type
+  if (!keepUiRandom) typeSel.value = t;
+
+  renderModView();
+  buildXML();
 }
 
 /* -------------------------
@@ -1764,9 +1417,6 @@ let previewTimer = null;
 function schedulePreview(){
   if (previewTimer) cancelAnimationFrame(previewTimer);
   previewTimer = requestAnimationFrame(() => { updatePreview(); previewTimer = null; });
-
-renderModView();
-buildXML();
 }
 
 /* -------------------------
@@ -1843,14 +1493,6 @@ document.addEventListener("keydown", (e) => {
   const mod = e.ctrlKey || e.metaKey;
   if (!mod) return;
 
-  // NEW: Ctrl/Cmd+A => select equation field AND copy whitespace-free equation
-  if (key === "a") {
-    e.preventDefault();
-    focusSelectAndCopyEquationNoSpaces();
-    return;
-  }
-
-  // Existing shortcuts
   if (key === "enter") { e.preventDefault(); randomizeSafe(); return; }
   if (key === "c") { e.preventDefault(); copyXML(); return; }
   if (key === "l") { e.preventDefault(); loadXML(); return; }
@@ -1867,7 +1509,6 @@ document.addEventListener("keydown", (e) => {
   updateSummary();
 })();
 </script>
-
-<script src="inject-eq-editor.js"></script>
+<script src="eqgen.inject.js"></script>
 </body>
 </html>
